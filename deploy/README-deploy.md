@@ -32,9 +32,17 @@ sudo docker exec addon_5c53de3b_esphome-dev esphome config  /config/esphome/gree
 sudo docker exec addon_5c53de3b_esphome-dev esphome compile /config/esphome/greenhouse-esphome/nodes/kc868-a16.yaml
 ```
 
-Alternativ ohne CLI: ESPHome-Builder-Dashboard (HA-UI → Add-on → Web-UI) — die
-Wrapper aus `deploy/haos-wrappers/` erscheinen dort als drei Nodes mit
-**Validate**/**Install**-Buttons.
+**Netzwerkmodus des KC868:** `network_mode` im `substitutions:`-Block von
+`nodes/kc868-a16.yaml` — `wifi` (aktuell) oder `ethernet` (LAN8720, Zielzustand).
+Der Wert muss dort stehen, weil er einen `!include`-Dateinamen bildet; in
+`substitutions.yaml` wäre er zu spät aufgelöst.
+
+> ⚠️ **Wrapper-Weg (`deploy/haos-wrappers/`) funktioniert für `kc868-a16` nicht:**
+> ESPHome löst den relativen Pfad aus `esphome: includes:`
+> (`../components/greenhouse_controller/vpd_math.h`) gegen die **Wrapper**-Datei
+> statt gegen die Node-Datei auf → „Could not find file". Für diesen Knoten
+> deshalb den CLI-Weg oben benutzen. Die Wrapper der beiden anderen Knoten sind
+> davon nicht betroffen (sie binden keine C++-Header ein).
 
 **Änderungs-Workflow:** Nie direkt im Server-Klon editieren. Änderungen lokal
 (Scratchpad-Klon) → `pytest` grün → push → auf dem Server `git pull`.

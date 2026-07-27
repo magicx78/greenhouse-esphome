@@ -4,12 +4,16 @@
 substitutions:
   node_name: "kc868-a16"
 
-  # Netzwerkmodus: "ethernet" (LAN8720, Design-Vorgabe docs/architecture.md)
-  # oder "wifi" (Notbetrieb ohne LAN-Kabel). Wählt packages/network-<modus>.yaml.
+  # >>> NETZWERKMODUS — hier umschalten: "wifi" oder "ethernet" <<<
+  # ethernet = LAN8720, Zielzustand der festen Installation (docs/architecture.md).
+  # wifi     = Betrieb ohne LAN-Kabel (aktueller Stand). Beides gleichzeitig
+  #            erlaubt ESPHome nicht; gewählt wird packages/network-<modus>.yaml.
+  # Die Grundregelung läuft netzunabhängig — der Modus betrifft nur
+  # HA-Anbindung, OTA und Netzwerk-Logs.
   # Muss HIER stehen, nicht in substitutions.yaml: der Wert wird für den
   # !include-Dateinamen gebraucht und Paket-Substitutions sind dann noch nicht
   # aufgelöst ("Cannot load include with unresolved substitutions").
-  network_mode: "ethernet"
+  network_mode: "wifi"
 
 esphome:
   name: ${node_name}
