@@ -12,6 +12,11 @@ esphome:
 esp32:
   variant: esp32s3
   toolchain: platformio
+  # Das Board hat 16 MB Flash (per esptool am Chip verifiziert). Ohne diese
+  # Angabe nimmt ESPHome 4 MB an und legt nur ~1,75 MB je OTA-Partition an —
+  # damit war der Build schon zu 85,8 % voll, bevor die LVGL-Seiten dazukamen.
+  # ACHTUNG: Änderung der Partitionstabelle -> nur per USB flashbar, nicht OTA.
+  flash_size: 16MB
   framework:
     type: esp-idf          # laut Anforderung ESP-IDF für das Display
 
