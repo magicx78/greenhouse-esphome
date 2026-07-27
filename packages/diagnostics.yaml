@@ -11,6 +11,7 @@ sensor:
     update_interval: 30s
   - platform: wifi_signal
     name: "${node_name} WiFi RSSI"
+    id: diag_wifi_rssi   # id nötig, damit Ethernet-Knoten den Sensor per !remove entfernen können
     update_interval: 60s
   - platform: debug
     free:

@@ -28,8 +28,12 @@ api:
     key: !secret api_key_kc868
 
 # Ethernet bestätigt (LAN8720). ESPHome erlaubt wifi+ethernet nicht zusammen —
-# das WLAN aus common.yaml wird hier entfernt (kein Fallback möglich).
+# das WLAN aus common.yaml wird hier entfernt (kein Fallback möglich), ebenso
+# der WiFi-RSSI-Diagnosesensor aus diagnostics.yaml.
 wifi: !remove
+
+sensor:
+  - id: !remove diag_wifi_rssi
 ethernet:
   type: LAN8720
   mdc_pin: GPIO23
