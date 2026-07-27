@@ -67,6 +67,39 @@ Bestätigt/vorkonfiguriert durch ESPHome:
   kollidiert er mit dem Modbus-UART.
 - CAN: separater Transceiver `TJA1051T/3` (U6, Netze `CANTX`/`CANRX`) — im
   Projekt nicht verwendet, aber nicht mit RS485 verwechseln.
+- Touch GT911: **TP_SDA=GPIO15, TP_SCL=GPIO7, TP_INT=GPIO16** (Schaltplan V3.0).
+  `TP_RST` liegt nicht am Modul, sondern am I/O-Expander.
+  ⚠️ GPIO8/GPIO9 sind **nicht frei** (R3 bzw. G5 des RGB-Panels) — eine frühere
+  Fassung hatte sie als Touch-I²C geraten.
+
+### Vollständige Modulbelegung V3.0 (aus dem Schaltplan ausgelesen, 2026-07-27)
+
+| GPIO | Netz | GPIO | Netz |
+|------|------|------|------|
+| IO1 | LCD_SDA / MOSI | IO18 | R4 |
+| IO2 | LCD_SCL / SCK | IO19 | ESP_USB_N |
+| IO4 | MISO | IO20 | ESP_USB_P |
+| IO5 | B1 | IO21 | B5 |
+| IO7 | **TP_SCL** | IO38 | HSYNC |
+| IO8 | R3 | IO39 | VSYNC |
+| IO9 | G5 | IO40 | DE |
+| IO10 | G4 | IO41 | LCD_PCLK |
+| IO11 | G3 | IO42 | LCD_CS |
+| IO12 | G2 | IO43 | **RS485_TX** → ESP **RX** |
+| IO13 | G1 | IO44 | **RS485_RX** → ESP **TX** |
+| IO14 | G0 | IO45 | B2 |
+| IO15 | **TP_SDA** | IO46 | R1 |
+| IO16 | **TP_INT** | IO47 | B4 |
+| IO17 | R5 | IO48 | B3 |
+
+Die RS485-Netznamen sind aus Sicht des **Transceivers** benannt: `485_TXD`
+hängt an Pin 1 (`RO`, Receiver Output) des MAX13487 und speist damit den
+ESP-Eingang. Deshalb ist `RS485_TX` (IO43) der **RX** des ESP — deckungsgleich
+mit dem Wiki-Beispiel `Serial2.begin(115200, SERIAL_8N1, 43, 44)`.
+
+**Fazit HMI:** Praktisch alle GPIOs sind durch RGB-Panel, Touch, USB und RS485
+belegt. Für zusätzliche Peripherie bleibt am HMI nichts übrig — das bestätigt
+die Notwendigkeit des dritten Knotens (`greenhouse-io`).
   (aus dem Schaltplan der vorliegenden Revision übernehmen).
 
 > Da die freien GPIOs stark vom Panel/PSRAM belegt sind, übernimmt das HMI

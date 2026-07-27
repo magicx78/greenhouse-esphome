@@ -67,10 +67,11 @@ display:
 # ---- Touch (nativer GT911) ----
 i2c:
   - id: bus_touch
-    # SDA/SCL des internen Touch-Busses: revisionsabhängig
-    # (im mipi_rgb-Modell bzw. Board-Schaltplan; hier TODO falls nötig)
-    sda: GPIO8            # TODO_AFTER_PIN_AUDIT (Board-Revision prüfen)
-    scl: GPIO9            # TODO_AFTER_PIN_AUDIT
+    # Aus dem Schaltplan V3.0 (Modul-Pinliste): TP_SDA=IO15, TP_SCL=IO7.
+    # Achtung: GPIO8/GPIO9 sind hier NICHT frei — sie führen R3 bzw. G5 des
+    # RGB-Panels. Bei anderer Board-Revision neu aus deren Schaltplan lesen.
+    sda: GPIO15
+    scl: GPIO7
     scan: true
 
 touchscreen:
