@@ -56,11 +56,21 @@ greenhouse_controller:
   leaf_offset: ${leaf_temperature_offset}
   max_humidity: ${default_max_humidity}
 
-# ---- Display (vordefiniertes Modell -> Pins/Timing gesetzt) ----
+# SPI nur für die Init-Sequenz des Panels. Pins aus dem Schaltplan V3.0:
+# LCD_SDA=IO1, LCD_SCL=IO2. Derselbe Bus führt auch zur SD-Karte — die hat
+# eine eigene CS-Leitung, deshalb ist hier kein miso_pin nötig.
+spi:
+  - id: spi_lcd
+    clk_pin: GPIO2
+    mosi_pin: GPIO1
+
+# ---- Display (vordefiniertes Modell -> Panel-Timing/Datenpins gesetzt) ----
 display:
   - platform: mipi_rgb
     model: WAVESHARE-4-480x480
     id: main_display
+    spi_id: spi_lcd
+    cs_pin: GPIO42          # LCD_CS laut Schaltplan V3.0
     auto_clear_enabled: false
     update_interval: never    # LVGL steuert das Rendering
 
