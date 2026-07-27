@@ -11,6 +11,7 @@ esphome:
 
 esp32:
   variant: esp32s3
+  toolchain: platformio
   framework:
     type: esp-idf          # laut Anforderung ESP-IDF für das Display
 
