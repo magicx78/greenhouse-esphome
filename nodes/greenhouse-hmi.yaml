@@ -182,7 +182,7 @@ binary_sensor:
   - platform: template
     name: "Automatik aktiv"
     lambda: |-
-      std::string m = id(sp_mode).state;
+      std::string m = id(sp_mode).current_option().str();
       return m == "AUTO_TEMPERATURE" || m == "AUTO_VPD";
 
 button:
@@ -265,7 +265,7 @@ interval:
           lv_label_set_text(id(lbl_rh), buf);
           snprintf(buf, sizeof(buf), "VPD: %.2f kPa", id(vpd_leaf).state);
           lv_label_set_text(id(lbl_vpd), buf);
-          lv_label_set_text(id(lbl_mode), (std::string("Modus: ") + id(sp_mode).state).c_str());
+          lv_label_set_text(id(lbl_mode), (std::string("Modus: ") + id(sp_mode).current_option().str()).c_str());
           lv_label_set_text(id(lbl_rs485), id(rs485_online).state ? "RS485: OK" : "RS485: FEHLER");
       - if:
           condition:

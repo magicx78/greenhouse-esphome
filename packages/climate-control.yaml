@@ -147,7 +147,7 @@ binary_sensor:
   - platform: template
     name: "Notfall aktiv"
     id: emergency_active
-    lambda: 'return id(sp_mode).state == "EMERGENCY";'
+    lambda: 'return id(sp_mode).current_option() == "EMERGENCY";'
 
 # --- Supervisor: läuft lokal, unabhängig von HA ---
 globals:
@@ -185,7 +185,7 @@ interval:
           sp.max_humidity = ${default_max_humidity};
 
           // Modus aus Select
-          std::string m = id(sp_mode).state;
+          std::string m = id(sp_mode).current_option().str();
           Mode mode = MODE_OFF;
           if (m == "MANUAL") mode = MODE_MANUAL;
           else if (m == "AUTO_TEMPERATURE") mode = MODE_AUTO_TEMPERATURE;
