@@ -14,11 +14,10 @@ substitutions:
   # --- Netzwerk / Ziel ---
   ha_dev_server: "10.10.10.205"         # HA-Dev-Server (nur Info)
 
-  # Netzwerkmodus des KC868: "ethernet" (LAN8720, Design-Vorgabe) oder "wifi"
-  # (Notnagel ohne LAN-Kabel). Wählt packages/network-<modus>.yaml aus.
-  # Beides gleichzeitig geht in ESPHome nicht. Die Grundregelung läuft
-  # netzunabhängig — der Modus betrifft nur HA-Anbindung, OTA und Logs.
-  network_mode: "ethernet"
+  # Hinweis: Der Netzwerkmodus des KC868 (ethernet|wifi) steht NICHT hier,
+  # sondern als `network_mode` im substitutions-Block von nodes/kc868-a16.yaml —
+  # er wird für einen !include-Dateinamen gebraucht und muss deshalb schon vor
+  # dem Zusammenführen der Pakete feststehen.
 
   # --- BLE-Thermometer MACs (in secrets.yaml besser aufgehoben) ---
   greenhouse_sensor_mac: "TODO"         # z.B. "A4:C1:38:xx:xx:xx"
