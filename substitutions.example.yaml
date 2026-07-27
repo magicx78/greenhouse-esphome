@@ -42,10 +42,15 @@ substitutions:
   servo_min_level: "TODO_CALIBRATE"     # z.B. "-0.6"
   servo_max_level: "TODO_CALIBRATE"     # z.B. "0.6"
 
-  # --- HMI RS485 (revisionsabhängig, aus Schaltplan) ---
-  hmi_rs485_tx: "TODO_AFTER_PIN_AUDIT"
-  hmi_rs485_rx: "TODO_AFTER_PIN_AUDIT"
-  hmi_rs485_de: "TODO_AFTER_PIN_AUDIT"  # falls Flow-Control-Pin nötig
+  # --- HMI RS485 (revisionsabhängig!) — Werte gelten für Waveshare V3.0 ---
+  # Quelle: Wiki-Manual S. 10/11, Beispiel "04_RS485_Test":
+  #   Serial2.begin(115200, SERIAL_8N1, 43, 44) -> GPIO43 = RXD, GPIO44 = TXD
+  # Bei anderer Board-Revision zuerst deren Schaltplan prüfen (Invariante 8).
+  hmi_rs485_tx: "GPIO44"
+  hmi_rs485_rx: "GPIO43"
+  # Kein DE-/Flow-Control-Pin: Transceiver ist ein MAX13487EESA+ (AutoDirection),
+  # am Bauteil hängen laut Schaltplan V3.0 nur 485_TXD/485_RXD.
+  # Deshalb bleibt modbus: flow_control_pin in nodes/greenhouse-hmi.yaml deaktiviert.
 
   # --- Modbus ---
   modbus_baud_rate: "19200"

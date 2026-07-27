@@ -79,6 +79,11 @@ touchscreen:
     i2c_id: bus_touch
     display: main_display
 
+# Logger auf das native USB des S3 umlegen: die Standard-UART0-Konsole liegt
+# auf GPIO43/44 — genau den Pins, die hier der RS485-/Modbus-UART belegt.
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
 # ---- RS485 / Modbus-Client zum KC868 ----
 uart:
   - id: uart_modbus
@@ -93,7 +98,9 @@ modbus:
   - id: modbus_hub
     uart_id: uart_modbus
     role: client
-    # flow_control_pin: ${hmi_rs485_de}   # aktivieren falls DE-Pin nötig
+    # Kein flow_control_pin: Der Transceiver auf V3.0 ist ein MAX13487EESA+
+    # (AutoDirection) — er schaltet die Richtung selbst. Bei einer Revision mit
+    # DE-Leitung hier wieder aufnehmen und den Pin aus deren Schaltplan setzen.
 
 modbus_controller:
   - id: kc868

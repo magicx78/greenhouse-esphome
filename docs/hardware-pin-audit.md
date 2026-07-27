@@ -53,8 +53,20 @@ Bestätigt/vorkonfiguriert durch ESPHome:
 - Touch: nativer `gt911`-Treiber am internen I²C des Boards.
 - PSRAM: Octal-PSRAM (ESP32-S3, 8 MB) → im `esp32:`/`psram:`-Block aktivieren;
   belegt intern GPIOs im Bereich GPIO33–37 (nicht anderweitig verwenden).
-- RS485: on-board Transceiver → **Modbus-Client-UART**. Die konkreten
-  UART-/DE-Pins sind revisionsabhängig: `hmi_rs485_tx/rx/de: TODO_AFTER_PIN_AUDIT`
+- RS485: on-board Transceiver → **Modbus-Client-UART**. Revisionsabhängig.
+  **Für V3.0 bestätigt (2026-07-27):**
+
+  | Signal | GPIO | Quelle |
+  |--------|------|--------|
+  | RS485 RXD (ESP empfängt) | GPIO43 | Wiki-Manual S. 10/11, Beispiel `04_RS485_Test`: `Serial2.begin(115200, SERIAL_8N1, 43, 44)` |
+  | RS485 TXD (ESP sendet) | GPIO44 | ebenda |
+  | DE / Richtungsumschaltung | **entfällt** | Schaltplan V3.0: U7 = `MAX13487EESA+` (AutoDirection); nur `485_TXD`/`485_RXD` am Bauteil |
+
+  ⚠️ GPIO43/44 sind auf dem ESP32-S3 zugleich die Standard-UART0-Konsole. Der
+  Logger muss deshalb auf `USB_SERIAL_JTAG` (natives USB) laufen, sonst
+  kollidiert er mit dem Modbus-UART.
+- CAN: separater Transceiver `TJA1051T/3` (U6, Netze `CANTX`/`CANRX`) — im
+  Projekt nicht verwendet, aber nicht mit RS485 verwechseln.
   (aus dem Schaltplan der vorliegenden Revision übernehmen).
 
 > Da die freien GPIOs stark vom Panel/PSRAM belegt sind, übernimmt das HMI
