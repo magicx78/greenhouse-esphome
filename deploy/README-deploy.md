@@ -11,24 +11,25 @@ liegt ein Klon unter `/config/esphome/greenhouse-esphome`.
 **Einmalig einrichten:**
 
 ```bash
-# per SSH (Terminal & SSH-Add-on, Profil "hadev"):
-git clone https://github.com/magicx78/greenhouse-esphome /config/esphome/greenhouse-esphome
-cp /config/esphome/greenhouse-esphome/deploy/haos-wrappers/*.yaml /config/esphome/
+# per SSH (Add-on "Advanced SSH & Web Terminal", Profil "hadev", User test + Key):
+sudo git clone https://github.com/magicx78/greenhouse-esphome /config/esphome/greenhouse-esphome
+sudo cp /config/esphome/greenhouse-esphome/deploy/haos-wrappers/*.yaml /config/esphome/
 # secrets.yaml + substitutions.yaml im Projekt-Root anlegen (aus den *.example.yaml,
 # echte Werte eintragen — bleiben un-committet)
 ```
 
-**Voraussetzung für die CLI:** Beim Terminal & SSH-Add-on den **Protection Mode
-ausschalten** (Einstellungen → Add-ons → Terminal & SSH), sonst gibt es kein
-`docker`. Der Builder-Container heißt hier `addon_5c53de3b_esphome-dev`
+**Voraussetzung für die CLI:** Beim SSH-Add-on den **Protection Mode ausschalten**
+(Einstellungen → Apps → Advanced SSH & Web Terminal → Info), sonst gibt es kein
+`docker`. Die SSH-Session läuft als User `test` (uid 1000) → Docker/Git immer mit
+`sudo` (passwortlos). Der Builder-Container heißt hier `addon_5c53de3b_esphome-dev`
 (ESPHome Device Builder **dev**-Channel; bei anderem Add-on `docker ps | grep esphome`).
 
 **Update + Validieren + Kompilieren:**
 
 ```bash
-git -C /config/esphome/greenhouse-esphome pull
-docker exec addon_5c53de3b_esphome-dev esphome config  /config/esphome/greenhouse-esphome/nodes/kc868-a16.yaml
-docker exec addon_5c53de3b_esphome-dev esphome compile /config/esphome/greenhouse-esphome/nodes/kc868-a16.yaml
+sudo git -C /config/esphome/greenhouse-esphome pull
+sudo docker exec addon_5c53de3b_esphome-dev esphome config  /config/esphome/greenhouse-esphome/nodes/kc868-a16.yaml
+sudo docker exec addon_5c53de3b_esphome-dev esphome compile /config/esphome/greenhouse-esphome/nodes/kc868-a16.yaml
 ```
 
 Alternativ ohne CLI: ESPHome-Builder-Dashboard (HA-UI → Add-on → Web-UI) — die

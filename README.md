@@ -82,7 +82,7 @@ esphome compile nodes/greenhouse-io.yaml
 > `TODO_AFTER_PIN_AUDIT`-Platzhalter als Pins stehen — das ist die Sperre.
 
 > Auf dem HAOS-Dev-Server laufen die `esphome`-Kommandos per
-> `docker exec addon_5c53de3b_esphome-dev esphome …` — Details und
+> `sudo docker exec addon_5c53de3b_esphome-dev esphome …` — Details und
 > Einrichtung: `deploy/README-deploy.md` (Weg A).
 
 ## Flash-Reihenfolge (Erstinbetriebnahme)
