@@ -1,0 +1,205 @@
+# packages/safety.yaml  (Knoten: kc868-a16)
+# Modbus-RTU-Server + Ausgangs-Watchdog + Arbitrierung/Interlocks.
+# Spiegelt tests/ghlib.py (verifiziert). Nutzt greenhouse::arbitrate_outputs()
+# aus vpd_math.h (per includes im Node-File eingebunden).
+# Erwartet Output-IDs aus dem Node-File:
+#   o_valve1..o_valve8, o_pump, o_led, o_exhaust
+
+globals:
+  - id: g_requested_mask
+    type: uint16_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_allowed_mask
+    type: uint16_t
+    restore_value: false
+    initial_value: '0xFFFF'
+  - id: g_locked_mask
+    type: uint16_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_active_mask
+    type: uint16_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_cmd_seq
+    type: uint16_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_ack_seq
+    type: uint16_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_error_mask
+    type: uint16_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_last_hb_value
+    type: uint16_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_last_hb_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_watchdog_time_s
+    type: uint16_t
+    restore_value: false
+    initial_value: '${watchdog_time_s}'
+  - id: g_max_active_valves
+    type: uint16_t
+    restore_value: false
+    initial_value: '${max_active_valves}'
+  - id: g_operating_mode
+    type: uint16_t
+    restore_value: false
+    initial_value: '0'
+
+uart:
+  - id: uart_modbus
+    tx_pin: GPIO13
+    rx_pin: GPIO16
+    baud_rate: ${modbus_baud_rate}
+    data_bits: 8
+    parity: NONE
+    stop_bits: 1
+
+modbus:
+  - id: modbus_hub
+    uart_id: uart_modbus
+    role: server
+
+modbus_server:
+  - modbus_id: modbus_hub
+    address: ${modbus_server_address}
+    registers:
+      - address: 0x0000            # Protokollversion
+        value_type: U_WORD
+        read_lambda: 'return 1;'
+      - address: 0x0001            # Firmwareversion 1.0
+        value_type: U_WORD
+        read_lambda: 'return (1 << 8) | 0;'
+      - address: 0x0002            # Uptime (U32)
+        value_type: U_DWORD_R
+        read_lambda: 'return (uint32_t)(millis() / 1000);'
+      - address: 0x0004            # Master-Heartbeat (Master schreibt Zähler)
+        value_type: U_WORD
+        read_lambda: 'return id(g_last_hb_value);'
+        write_lambda: |-
+          id(g_last_hb_value) = (uint16_t) x;
+          id(g_last_hb_ms) = millis();
+          return true;
+      - address: 0x0005            # comm_status
+        value_type: U_WORD
+        read_lambda: |-
+          bool wd_ok = (millis() - id(g_last_hb_ms)) < (uint32_t) id(g_watchdog_time_s) * 1000UL;
+          uint16_t s = 0;
+          if (wd_ok) s |= 1;
+          if (id(g_last_hb_ms) != 0) s |= 4;
+          return s;
+      - address: 0x0006            # error_bitmask
+        value_type: U_WORD
+        read_lambda: 'return id(g_error_mask);'
+      - address: 0x0010            # requested_output_mask (W)
+        value_type: U_WORD
+        read_lambda: 'return id(g_requested_mask);'
+        write_lambda: |-
+          id(g_requested_mask) = (uint16_t) x;
+          return true;
+      - address: 0x0011            # active_output_mask (R, logisch!)
+        value_type: U_WORD
+        read_lambda: 'return id(g_active_mask);'
+      - address: 0x0012            # allowed_output_mask (W)
+        value_type: U_WORD
+        read_lambda: 'return id(g_allowed_mask);'
+        write_lambda: |-
+          id(g_allowed_mask) = (uint16_t) x;
+          return true;
+      - address: 0x0013            # locked_output_mask (R)
+        value_type: U_WORD
+        read_lambda: 'return id(g_locked_mask);'
+      - address: 0x0020            # command_sequence (W)
+        value_type: U_WORD
+        read_lambda: 'return id(g_cmd_seq);'
+        write_lambda: |-
+          id(g_cmd_seq) = (uint16_t) x;
+          id(g_ack_seq) = (uint16_t) x;   // Bestätigung
+          return true;
+      - address: 0x0021            # acked_sequence (R)
+        value_type: U_WORD
+        read_lambda: 'return id(g_ack_seq);'
+      - address: 0x0022            # watchdog_time_s (W)
+        value_type: U_WORD
+        read_lambda: 'return id(g_watchdog_time_s);'
+        write_lambda: |-
+          if (x < 2 || x > 3600) return false;   // Plausibilität
+          id(g_watchdog_time_s) = (uint16_t) x;
+          return true;
+      - address: 0x0023            # operating_mode (W)
+        value_type: U_WORD
+        read_lambda: 'return id(g_operating_mode);'
+        write_lambda: |-
+          if (x > 6) return false;
+          id(g_operating_mode) = (uint16_t) x;
+          return true;
+      - address: 0x0033            # max_active_valves (W)
+        value_type: U_WORD
+        read_lambda: 'return id(g_max_active_valves);'
+        write_lambda: |-
+          if (x < 1 || x > 8) return false;
+          id(g_max_active_valves) = (uint16_t) x;
+          return true;
+
+# Zyklische Arbitrierung + Watchdog (deterministisch, alle 250 ms)
+interval:
+  - interval: 250ms
+    then:
+      - lambda: |-
+          uint32_t now = millis();
+          bool wd_ok = id(g_last_hb_ms) != 0 &&
+                       (now - id(g_last_hb_ms)) < (uint32_t) id(g_watchdog_time_s) * 1000UL;
+
+          // Fehlerbit RS485_WATCHDOG (Bit 0) pflegen
+          if (!wd_ok) id(g_error_mask) |= 0x0001; else id(g_error_mask) &= ~0x0001;
+
+          uint16_t active = greenhouse::arbitrate_outputs(
+              id(g_requested_mask), id(g_allowed_mask), id(g_locked_mask),
+              wd_ok, (uint8_t) id(g_max_active_valves), /*exhaust_failsafe=*/true);
+          id(g_active_mask) = active;
+
+          // Ausgänge setzen (Low-Side-MOSFET über PCF8574, invertiert in pin-def)
+          (active & (1 << 0)) ? id(o_valve1).turn_on() : id(o_valve1).turn_off();
+          (active & (1 << 1)) ? id(o_valve2).turn_on() : id(o_valve2).turn_off();
+          (active & (1 << 2)) ? id(o_valve3).turn_on() : id(o_valve3).turn_off();
+          (active & (1 << 3)) ? id(o_valve4).turn_on() : id(o_valve4).turn_off();
+          (active & (1 << 4)) ? id(o_valve5).turn_on() : id(o_valve5).turn_off();
+          (active & (1 << 5)) ? id(o_valve6).turn_on() : id(o_valve6).turn_off();
+          (active & (1 << 6)) ? id(o_valve7).turn_on() : id(o_valve7).turn_off();
+          (active & (1 << 7)) ? id(o_valve8).turn_on() : id(o_valve8).turn_off();
+          (active & (1 << 8)) ? id(o_pump).turn_on()   : id(o_pump).turn_off();
+          (active & (1 << 9)) ? id(o_led).turn_on()    : id(o_led).turn_off();
+          (active & (1 << 10)) ? id(o_exhaust).turn_on() : id(o_exhaust).turn_off();
+
+# Diagnose als HA-Sensoren
+sensor:
+  - platform: template
+    name: "KC868 Active Output Mask"
+    lambda: 'return id(g_active_mask);'
+    update_interval: 2s
+  - platform: template
+    name: "KC868 Error Bitmask"
+    lambda: 'return id(g_error_mask);'
+    update_interval: 2s
+  - platform: template
+    name: "KC868 Heartbeat Age"
+    unit_of_measurement: "s"
+    accuracy_decimals: 1
+    lambda: 'return id(g_last_hb_ms) == 0 ? NAN : (millis() - id(g_last_hb_ms)) / 1000.0f;'
+    update_interval: 1s
+
+binary_sensor:
+  - platform: template
+    name: "KC868 RS485 Watchdog OK"
+    lambda: |-
+      return id(g_last_hb_ms) != 0 &&
+             (millis() - id(g_last_hb_ms)) < (uint32_t) id(g_watchdog_time_s) * 1000UL;

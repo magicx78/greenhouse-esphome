@@ -1,0 +1,116 @@
+# packages/weight.yaml  (Knoten: greenhouse-io)
+# HX711 + TAL220 10 kg. Roh/gefiltert, Tara, Kalibrierung, Überlast, Stabilität.
+# Kalibrierwerte in globals (persistiert). Keine Auto-Tara mit Topf auf der Waage!
+
+globals:
+  - id: g_hx_tare
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: g_hx_scale
+    type: float
+    restore_value: true
+    initial_value: '1.0'      # g pro Rohwert-Einheit (kalibrieren!)
+  - id: g_cal_known_g
+    type: float
+    restore_value: true
+    initial_value: '1000'
+  - id: g_hx_raw
+    type: float
+    restore_value: false
+    initial_value: '0'
+
+sensor:
+  - platform: hx711
+    id: hx_raw
+    name: "Waage Rohwert"
+    dout_pin: ${hx711_dout_pin}
+    clk_pin: ${hx711_clk_pin}
+    gain: 128
+    update_interval: 1s
+    internal: true
+    filters:
+      - median:
+          window_size: 7
+          send_every: 3
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
+    on_value:
+      - lambda: 'id(g_hx_raw) = x;'
+
+  - platform: template
+    name: "Gewicht"
+    id: weight_g
+    unit_of_measurement: "g"
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: 'return (id(g_hx_raw) - id(g_hx_tare)) * id(g_hx_scale);'
+
+  - platform: template
+    name: "Kalibrierfaktor"
+    unit_of_measurement: "g/LSB"
+    accuracy_decimals: 6
+    update_interval: 30s
+    lambda: 'return id(g_hx_scale);'
+
+  - platform: template
+    name: "Gewichtsänderung/Stunde"
+    id: weight_rate_h
+    unit_of_measurement: "g/h"
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: |-
+      static float last = NAN; static uint32_t last_ms = 0;
+      float w = id(weight_g).state; uint32_t now = millis();
+      float rate = NAN;
+      if (!isnan(last) && now > last_ms)
+        rate = (w - last) / ((now - last_ms) / 3600000.0f);
+      last = w; last_ms = now; return rate;
+
+number:
+  - platform: template
+    name: "Kalibriergewicht"
+    id: cal_known_weight
+    unit_of_measurement: "g"
+    min_value: 50
+    max_value: 10000
+    step: 10
+    initial_value: "1000"
+    restore_value: true
+    optimistic: true
+    on_value:
+      - lambda: 'id(g_cal_known_g) = x;'
+
+button:
+  - platform: template
+    name: "Tara"
+    on_press:
+      - lambda: 'id(g_hx_tare) = id(g_hx_raw);'
+  - platform: template
+    name: "Wägezelle kalibrieren"
+    on_press:
+      - lambda: |-
+          // Vor Kalibrierung TARA (leer), dann bekanntes Gewicht auflegen,
+          // dann diesen Button drücken.
+          float span = id(g_hx_raw) - id(g_hx_tare);
+          if (fabsf(span) > 1.0f)
+            id(g_hx_scale) = id(g_cal_known_g) / span;
+  - platform: template
+    name: "Kalibrierung zurücksetzen"
+    on_press:
+      - lambda: 'id(g_hx_scale) = 1.0f; id(g_hx_tare) = 0.0f;'
+
+binary_sensor:
+  - platform: template
+    name: "Waage Überlast"
+    lambda: 'return id(weight_g).state > 10500;'   # > Nennlast 10 kg
+  - platform: template
+    name: "Waage stabil"
+    lambda: |-
+      static float prev = NAN; float w = id(weight_g).state;
+      bool stable = !isnan(prev) && fabsf(w - prev) < 5.0f;
+      prev = w; return stable;
+  - platform: template
+    name: "HX711 Fehler"
+    lambda: 'return isnan(id(hx_raw).state);'

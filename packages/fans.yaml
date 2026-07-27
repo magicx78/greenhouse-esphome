@@ -1,0 +1,134 @@
+# packages/fans.yaml  (Knoten: greenhouse-io)
+# 2x 4-Draht-Lüfter: 25 kHz PWM + Tacho (Pulse-Counter) + Stall-Erkennung +
+# Start-Boost + Übertemperatur-Failsafe (lokal, auch ohne HA).
+#
+# TODO (bestätigen, siehe hardware-pin-audit / Datenblatt):
+#   Hersteller/Modell/Spannung/Nennstrom/PWM-Spez/Tacho-Pegel/PPR/max m³/h.
+#   Annahme: 12V-PC-4-Draht, PWM open-drain, Tacho open-collector -> 3,3V Pull-up.
+
+output:
+  - platform: ledc
+    id: fan1_pwm
+    pin: ${fan_1_pwm_pin}
+    frequency: 25000 Hz
+    min_power: 0.0
+    max_power: 1.0
+    zero_means_zero: true
+  - platform: ledc
+    id: fan2_pwm
+    pin: ${fan_2_pwm_pin}
+    frequency: 25000 Hz
+    min_power: 0.0
+    max_power: 1.0
+    zero_means_zero: true
+
+fan:
+  - platform: speed
+    id: fan1
+    output: fan1_pwm
+    name: "Umluft Lüfter 1"
+  - platform: speed
+    id: fan2
+    output: fan2_pwm
+    name: "Umluft Lüfter 2"
+
+sensor:
+  # Tacho -> Pulse pro Minute; RPM = ppm / Pulse-pro-Umdrehung
+  - platform: pulse_counter
+    pin:
+      number: ${fan_1_tach_pin}
+      mode:
+        input: true
+        pullup: true
+    name: "Lüfter 1 Ist-RPM"
+    id: fan1_rpm
+    update_interval: 2s
+    unit_of_measurement: "RPM"
+    filters:
+      - lambda: 'return x / ${fan_pulses_per_revolution};'
+  - platform: pulse_counter
+    pin:
+      number: ${fan_2_tach_pin}
+      mode:
+        input: true
+        pullup: true
+    name: "Lüfter 2 Ist-RPM"
+    id: fan2_rpm
+    update_interval: 2s
+    unit_of_measurement: "RPM"
+    filters:
+      - lambda: 'return x / ${fan_pulses_per_revolution};'
+
+  # Sollleistung vom HMI-Supervisor (unkritischer Pfad über HA)
+  - platform: homeassistant
+    id: io_desired_fan_pct
+    entity_id: sensor.greenhouse_hmi_umluft_sollleistung
+    internal: true
+  - platform: homeassistant
+    id: io_gh_temp
+    entity_id: sensor.greenhouse_hmi_gewaechshaus_temperatur
+    internal: true
+
+number:
+  - platform: template
+    name: "Lüfter Notfallleistung %"
+    id: fan_emergency_pct
+    min_value: 50
+    max_value: 100
+    step: 5
+    initial_value: "100"
+    restore_value: true
+    optimistic: true
+  - platform: template
+    name: "Lüfter Übertemp-Schwelle"
+    id: fan_overtemp_c
+    unit_of_measurement: "°C"
+    min_value: 25
+    max_value: 45
+    step: 0.5
+    initial_value: "33"
+    restore_value: true
+    optimistic: true
+
+binary_sensor:
+  - platform: template
+    name: "Lüfter 1 Stall"
+    lambda: |-
+      return id(fan1).state && id(fan1).speed > ${fan_min_percent} &&
+             (isnan(id(fan1_rpm).state) || id(fan1_rpm).state < 60);
+  - platform: template
+    name: "Lüfter 2 Stall"
+    lambda: |-
+      return id(fan2).state && id(fan2).speed > ${fan_min_percent} &&
+             (isnan(id(fan2_rpm).state) || id(fan2_rpm).state < 60);
+
+globals:
+  - id: g_fan_boost_until
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+interval:
+  - interval: 2s
+    then:
+      - lambda: |-
+          // Lokale Übertemperatur-Failsafe: hat Vorrang. Bei fehlendem/altem
+          // Temperaturwert konservativ auf sichere feste Leistung.
+          float temp = id(io_gh_temp).has_state() ? id(io_gh_temp).state : NAN;
+          float pct;
+          bool overtemp = !isnan(temp) && temp >= id(fan_overtemp_c).state;
+          if (isnan(temp)) {
+            pct = 60.0f;                       // sichere Feste bei Sensorausfall
+          } else if (overtemp) {
+            pct = id(fan_emergency_pct).state; // Notfallleistung
+          } else if (id(io_desired_fan_pct).has_state()) {
+            pct = id(io_desired_fan_pct).state;
+          } else {
+            pct = ${fan_min_percent};
+          }
+          if (pct < ${fan_min_percent} && pct > 0.5f) pct = ${fan_min_percent}; // Mindestdrehzahl
+
+          // sanfte Umsetzung (kein Sprung): fan.turn_on mit speed in %
+          int spd = (int) roundf(pct);
+          auto c1 = id(fan1).turn_on(); c1.set_speed(spd); c1.perform();
+          auto c2 = id(fan2).turn_on(); c2.set_speed(spd); c2.perform();

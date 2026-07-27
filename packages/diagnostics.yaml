@@ -1,0 +1,35 @@
+# packages/diagnostics.yaml — Diagnose-Entitäten (native `debug`-Komponente)
+# Erwartet Substitution ${node_name}. Von jedem Knoten eingebunden.
+
+debug:
+  update_interval: 30s
+
+sensor:
+  - platform: uptime
+    name: "${node_name} Uptime"
+    id: diag_uptime
+    update_interval: 30s
+  - platform: wifi_signal
+    name: "${node_name} WiFi RSSI"
+    update_interval: 60s
+  - platform: debug
+    free:
+      name: "${node_name} Heap Free"
+      id: diag_free_heap
+    block:
+      name: "${node_name} Heap Max Block"
+    loop_time:
+      name: "${node_name} Loop Time"
+
+text_sensor:
+  - platform: version
+    name: "${node_name} ESPHome Version"
+  - platform: debug
+    device:
+      name: "${node_name} Device Info"
+    reset_reason:
+      name: "${node_name} Reset Reason"
+
+binary_sensor:
+  - platform: status
+    name: "${node_name} Status"

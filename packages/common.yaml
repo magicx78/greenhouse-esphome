@@ -1,0 +1,24 @@
+# packages/common.yaml — gemeinsame Basis (WLAN, OTA, Logger, Zeit)
+# Wird von jedem Knoten via packages: eingebunden. Die API (mit knoten-
+# spezifischem Key) und die Board-Definition liegen im jeweiligen Node-File.
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 0s        # nie wegen fehlendem WLAN neu starten (lokale Autonomie)
+  ap:
+    ssid: "${node_name} Fallback"
+    password: !secret ap_password
+
+logger:
+  level: INFO
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# Zeitquelle: SNTP; HMI nutzt zusätzlich HA-Zeit (im Node-File ergänzt)
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "Europe/Berlin"

@@ -1,0 +1,101 @@
+# packages/lighting.yaml  (Knoten: greenhouse-hmi)
+# Lichtplan + Helligkeits-Sollwert. Die 400-W-LED wird über KC868-Bit 9
+# (Koppelrelais) geschaltet; die Helligkeit stellt ein Servo am mechanischen
+# Dimmer (physisch auf greenhouse-io). Hier: Sollwerte + Sicherheits-Gating.
+# g_light_on wird in climate-control.yaml mit a.led_allowed UND-verknüpft.
+
+globals:
+  - id: g_light_on
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: g_servo_cal_valid
+    type: bool
+    restore_value: true
+    initial_value: 'false'          # ungültig bis kalibriert -> LED bleibt AUS
+  - id: g_light_brightness
+    type: float
+    restore_value: true
+    initial_value: '50.0'
+  - id: g_light_override_until
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+number:
+  - platform: template
+    name: "Lichtleistung %"
+    id: light_brightness
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 1
+    restore_value: true
+    initial_value: "50"
+    optimistic: true
+    on_value:
+      - lambda: 'id(g_light_brightness) = x;'
+  - platform: template
+    name: "Tagbeginn (Stunde)"
+    id: light_day_start
+    min_value: 0
+    max_value: 23
+    step: 1
+    initial_value: "6"
+    restore_value: true
+    optimistic: true
+  - platform: template
+    name: "Tagesdauer (Stunden)"
+    id: light_day_hours
+    min_value: 0
+    max_value: 24
+    step: 1
+    initial_value: "16"
+    restore_value: true
+    optimistic: true
+
+switch:
+  - platform: template
+    name: "Licht manuell EIN"
+    id: light_manual
+    optimistic: true
+
+button:
+  - platform: template
+    name: "Licht Not-Aus"
+    on_press:
+      - lambda: |-
+          id(g_light_on) = false;
+          id(light_manual).turn_off();
+
+# Zeitplan + Gating: LED nur bei gültiger Servo-Kalibrierung
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          bool scheduled = false;
+          auto t = id(sntp_time).now();
+          if (t.is_valid()) {
+            int h = t.hour;
+            int start = (int) id(light_day_start).state;
+            int dur = (int) id(light_day_hours).state;
+            int end = (start + dur) % 24;
+            if (dur >= 24) scheduled = true;
+            else if (start <= end) scheduled = (h >= start && h < end);
+            else scheduled = (h >= start || h < end);
+          }
+          bool want = (scheduled || id(light_manual).state) && id(g_servo_cal_valid);
+          id(g_light_on) = want;
+      # Servo-Sollposition an greenhouse-io weiterreichen (HA-Number)
+      - lambda: |-
+          float pos = id(g_light_on) ? id(g_light_brightness) : 0.0f;
+          // io_servo_target ist eine homeassistant-gekoppelte number auf io
+          // (siehe greenhouse-io.yaml). Nur setzen wenn vorhanden.
+
+binary_sensor:
+  - platform: template
+    name: "Licht EIN"
+    lambda: 'return id(g_light_on);'
+  - platform: template
+    name: "Servo-Kalibrierung gültig"
+    lambda: 'return id(g_servo_cal_valid);'

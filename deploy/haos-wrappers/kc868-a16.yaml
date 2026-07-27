@@ -1,0 +1,10 @@
+# HAOS-Wrapper: nach /config/esphome/ kopieren, Projektordner daneben:
+#   /config/esphome/greenhouse-esphome/...
+#   /config/esphome/kc868-a16.yaml   <- diese Datei
+# Der ESPHome-Add-on-Dashboard listet nur YAMLs auf oberster Ebene; dieser
+# Wrapper zieht die eigentliche Node-Konfiguration als Package herein.
+# secrets.yaml des Add-ons: /config/esphome/secrets.yaml (Werte aus
+# greenhouse-esphome/secrets.example.yaml übernehmen).
+
+packages:
+  node: !include greenhouse-esphome/nodes/kc868-a16.yaml

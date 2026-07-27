@@ -1,0 +1,261 @@
+# nodes/greenhouse-hmi.yaml — Waveshare ESP32-S3-Touch-LCD-4
+# LVGL-HMI + Supervisor + Modbus-RTU-Client zum KC868 + HA-Anbindung.
+# Display/Touch nutzen vordefinierte Treiber; RS485-Pins revisionsabhängig.
+
+substitutions:
+  node_name: "greenhouse-hmi"
+
+esphome:
+  name: ${node_name}
+  friendly_name: "Gewächshaus HMI"
+
+esp32:
+  variant: esp32s3
+  framework:
+    type: esp-idf          # laut Anforderung ESP-IDF für das Display
+
+# Octal-PSRAM (8 MB) für LVGL-Framebuffer
+psram:
+  mode: octal
+  speed: 80MHz
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [greenhouse_controller]
+
+packages:
+  subs: !include ../substitutions.yaml
+  common: !include ../packages/common.yaml
+  diagnostics: !include ../packages/diagnostics.yaml
+  ble: !include ../packages/ble-sensors.yaml
+  climate: !include ../packages/climate-control.yaml
+  irrigation: !include ../packages/irrigation.yaml
+  lighting: !include ../packages/lighting.yaml
+
+api:
+  encryption:
+    key: !secret api_key_hmi
+
+# HA als zusätzliche Zeitquelle (SNTP kommt aus common.yaml)
+time:
+  - platform: homeassistant
+    id: ha_time
+
+# ---- External Component: Regel-/VPD-Logik ----
+greenhouse_controller:
+  id: gh_ctrl
+  target_temp: ${default_target_temperature}
+  min_temp: ${default_min_temperature}
+  max_temp: ${default_max_temperature}
+  emergency_temp: ${emergency_temperature}
+  target_vpd: ${default_target_vpd}
+  vpd_deadband: ${default_vpd_deadband}
+  leaf_offset: ${leaf_temperature_offset}
+  max_humidity: ${default_max_humidity}
+
+# ---- Display (vordefiniertes Modell -> Pins/Timing gesetzt) ----
+display:
+  - platform: mipi_rgb
+    model: WAVESHARE-4-480x480
+    id: main_display
+    auto_clear_enabled: false
+    update_interval: never    # LVGL steuert das Rendering
+
+# ---- Touch (nativer GT911) ----
+i2c:
+  - id: bus_touch
+    # SDA/SCL des internen Touch-Busses: revisionsabhängig
+    # (im mipi_rgb-Modell bzw. Board-Schaltplan; hier TODO falls nötig)
+    sda: GPIO8            # TODO_AFTER_PIN_AUDIT (Board-Revision prüfen)
+    scl: GPIO9            # TODO_AFTER_PIN_AUDIT
+    scan: true
+
+touchscreen:
+  - platform: gt911
+    id: gt911_touch
+    i2c_id: bus_touch
+    display: main_display
+
+# ---- RS485 / Modbus-Client zum KC868 ----
+uart:
+  - id: uart_modbus
+    tx_pin: ${hmi_rs485_tx}
+    rx_pin: ${hmi_rs485_rx}
+    baud_rate: ${modbus_baud_rate}
+    data_bits: 8
+    parity: NONE
+    stop_bits: 1
+
+modbus:
+  - id: modbus_hub
+    uart_id: uart_modbus
+    role: client
+    # flow_control_pin: ${hmi_rs485_de}   # aktivieren falls DE-Pin nötig
+
+modbus_controller:
+  - id: kc868
+    modbus_id: modbus_hub
+    address: ${modbus_server_address}
+    update_interval: 1s
+
+# Schreibbare Register (vom Supervisor via make_call gesetzt) + Lesewerte
+number:
+  - platform: modbus_controller
+    modbus_controller_id: kc868
+    id: mb_requested
+    internal: true
+    register_type: holding
+    address: 0x0010
+    value_type: U_WORD
+  - platform: modbus_controller
+    modbus_controller_id: kc868
+    id: mb_heartbeat
+    internal: true
+    register_type: holding
+    address: 0x0004
+    value_type: U_WORD
+  - platform: modbus_controller
+    modbus_controller_id: kc868
+    id: mb_mode
+    internal: true
+    register_type: holding
+    address: 0x0023
+    value_type: U_WORD
+
+sensor:
+  - platform: modbus_controller
+    modbus_controller_id: kc868
+    name: "KC868 Aktive Ausgänge (Modbus)"
+    id: mb_active_mask
+    register_type: holding
+    address: 0x0011
+    value_type: U_WORD
+  - platform: modbus_controller
+    modbus_controller_id: kc868
+    name: "KC868 Fehlermaske (Modbus)"
+    id: mb_error_mask
+    register_type: holding
+    address: 0x0006
+    value_type: U_WORD
+  - platform: modbus_controller
+    modbus_controller_id: kc868
+    name: "KC868 Comm-Status (Modbus)"
+    id: mb_comm_status
+    register_type: holding
+    address: 0x0005
+    value_type: U_WORD
+  # Sollleistung Umluft für greenhouse-io (unkritischer Pfad)
+  - platform: template
+    name: "Umluft Sollleistung"
+    id: umluft_soll
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: 2s
+    lambda: 'return id(g_desired_fan_pct);'
+
+binary_sensor:
+  - platform: template
+    name: "RS485 online"
+    id: rs485_online
+    lambda: 'return id(mb_comm_status).has_state() && ((int) id(mb_comm_status).state & 1);'
+  - platform: template
+    name: "Automatik aktiv"
+    lambda: |-
+      std::string m = id(sp_mode).state;
+      return m == "AUTO_TEMPERATURE" || m == "AUTO_VPD";
+
+button:
+  - platform: template
+    name: "Not-Aus"
+    on_press:
+      - lambda: |-
+          id(sp_mode).make_call().set_option("EMERGENCY").perform();
+  - platform: template
+    name: "RS485 neu synchronisieren"
+    on_press:
+      - lambda: 'id(g_hb_counter) = 0;'
+  - platform: template
+    name: "Alarm quittieren"
+    on_press:
+      - lambda: 'ESP_LOGI("hmi","Alarm quittiert (Schutzaktion bleibt aktiv)");'
+
+# ============================ LVGL UI ============================
+# Kompakte, erweiterbare Oberfläche (480x480). Übersicht + Navigation.
+# Weitere Seiten (Licht/Lüfter/Gewicht/Sensoren/Kalibrierung/Diagnose/
+# Einstellungen) nach diesem Muster ergänzen.
+lvgl:
+  displays:
+    - main_display
+  touchscreens:
+    - gt911_touch
+  # Idle-Dimmung / Bildschirmabschaltung
+  on_idle:
+    timeout: 45s
+    then:
+      - lvgl.pause:
+  theme:
+    label:
+      text_font: montserrat_20
+  top_layer:
+    # Alarm-Statusleiste (auf jeder Seite sichtbar)
+    widgets:
+      - obj:
+          id: alarm_bar
+          align: TOP_MID
+          width: 480
+          height: 40
+          bg_color: 0xB00020
+          hidden: true
+          widgets:
+            - label:
+                id: alarm_label
+                align: CENTER
+                text: "ALARM"
+                text_color: 0xFFFFFF
+  pages:
+    - id: page_overview
+      widgets:
+        - label: { align: TOP_MID, y: 8, text: "Gewächshaus – Übersicht" }
+        - label: { id: lbl_temp, align: LEFT_MID, x: 20, y: -80, text: "T: -- °C" }
+        - label: { id: lbl_rh,   align: LEFT_MID, x: 20, y: -40, text: "RH: -- %" }
+        - label: { id: lbl_vpd,  align: LEFT_MID, x: 20, y: 0,   text: "VPD: -- kPa" }
+        - label: { id: lbl_mode, align: LEFT_MID, x: 20, y: 40,  text: "Modus: --" }
+        - label: { id: lbl_rs485, align: LEFT_MID, x: 20, y: 80, text: "RS485: --" }
+        - button:
+            id: btn_mode_auto
+            align: BOTTOM_MID
+            y: -20
+            width: 300
+            height: 56
+            widgets:
+              - label: { align: CENTER, text: "AUTO_VPD" }
+            on_click:
+              - lambda: 'id(sp_mode).make_call().set_option("AUTO_VPD").perform();'
+
+# Live-Aktualisierung der LVGL-Labels + Alarmleiste
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          char buf[32];
+          snprintf(buf, sizeof(buf), "T: %.1f °C", id(gh_temp).state);
+          lv_label_set_text(id(lbl_temp), buf);
+          snprintf(buf, sizeof(buf), "RH: %.0f %%", id(gh_rh).state);
+          lv_label_set_text(id(lbl_rh), buf);
+          snprintf(buf, sizeof(buf), "VPD: %.2f kPa", id(vpd_leaf).state);
+          lv_label_set_text(id(lbl_vpd), buf);
+          lv_label_set_text(id(lbl_mode), (std::string("Modus: ") + id(sp_mode).state).c_str());
+          lv_label_set_text(id(lbl_rs485), id(rs485_online).state ? "RS485: OK" : "RS485: FEHLER");
+      - if:
+          condition:
+            lambda: 'return id(emergency_active).state || id(data_stale).state || !id(rs485_online).state;'
+          then:
+            - lvgl.widget.show: alarm_bar
+            - lambda: |-
+                const char* t = id(data_stale).state ? "SENSOR VERALTET"
+                              : (!id(rs485_online).state ? "RS485 AUSFALL" : "NOTFALL");
+                lv_label_set_text(id(alarm_label), t);
+          else:
+            - lvgl.widget.hide: alarm_bar

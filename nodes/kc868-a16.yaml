@@ -1,0 +1,109 @@
+# nodes/kc868-a16.yaml — KinCony KC868-A16 (Leistungsausgänge + Modbus-Server)
+# Bestätigte Pins aus offizieller ESPHome-Referenz (siehe docs/hardware-pin-audit.md).
+
+substitutions:
+  node_name: "kc868-a16"
+
+esphome:
+  name: ${node_name}
+  friendly_name: "Gewächshaus KC868-A16"
+  includes:
+    - ../components/greenhouse_controller/vpd_math.h   # nur die Header-Math
+
+esp32:
+  variant: esp32
+  framework:
+    type: esp-idf
+
+# Board-übergreifende Basis + Diagnose
+# subs zuerst: zentrale Substitutions (Node-eigene gewinnen bei Konflikt)
+packages:
+  subs: !include ../substitutions.yaml
+  common: !include ../packages/common.yaml
+  diagnostics: !include ../packages/diagnostics.yaml
+  safety: !include ../packages/safety.yaml
+
+api:
+  encryption:
+    key: !secret api_key_kc868
+
+# Ethernet bestätigt (LAN8720). ESPHome erlaubt wifi+ethernet nicht zusammen —
+# das WLAN aus common.yaml wird hier entfernt (kein Fallback möglich).
+wifi: !remove
+ethernet:
+  type: LAN8720
+  mdc_pin: GPIO23
+  mdio_pin: GPIO18
+  clk:
+    pin: GPIO17
+    mode: CLK_OUT
+  phy_addr: 0
+
+# I²C für die PCF8574-Expander (bestätigt GPIO4/5)
+i2c:
+  sda: GPIO4
+  scl:
+    number: GPIO5
+    ignore_strapping_warning: true
+
+pcf8574:
+  - id: inputs_1_8
+    address: 0x22
+  - id: inputs_9_16
+    address: 0x21
+  - id: outputs_1_8
+    address: 0x24
+  - id: outputs_9_16
+    address: 0x25
+
+# --- Leistungsausgänge (NICHT als frei schaltbare HA-Switches!) ---
+# Sie werden ausschließlich durch die Arbitrierung in safety.yaml gesetzt.
+output:
+  - platform: gpio
+    id: o_valve1
+    pin: {pcf8574: outputs_1_8, number: 0, mode: OUTPUT, inverted: true}
+  - platform: gpio
+    id: o_valve2
+    pin: {pcf8574: outputs_1_8, number: 1, mode: OUTPUT, inverted: true}
+  - platform: gpio
+    id: o_valve3
+    pin: {pcf8574: outputs_1_8, number: 2, mode: OUTPUT, inverted: true}
+  - platform: gpio
+    id: o_valve4
+    pin: {pcf8574: outputs_1_8, number: 3, mode: OUTPUT, inverted: true}
+  - platform: gpio
+    id: o_valve5
+    pin: {pcf8574: outputs_1_8, number: 4, mode: OUTPUT, inverted: true}
+  - platform: gpio
+    id: o_valve6
+    pin: {pcf8574: outputs_1_8, number: 5, mode: OUTPUT, inverted: true}
+  - platform: gpio
+    id: o_valve7
+    pin: {pcf8574: outputs_1_8, number: 6, mode: OUTPUT, inverted: true}
+  - platform: gpio
+    id: o_valve8
+    pin: {pcf8574: outputs_1_8, number: 7, mode: OUTPUT, inverted: true}
+  - platform: gpio
+    id: o_pump       # Y09
+    pin: {pcf8574: outputs_9_16, number: 0, mode: OUTPUT, inverted: true}
+  - platform: gpio
+    id: o_led        # Y10 -> Koppelrelais LED
+    pin: {pcf8574: outputs_9_16, number: 1, mode: OUTPUT, inverted: true}
+  - platform: gpio
+    id: o_exhaust    # Y11 -> Koppelrelais Abluft
+    pin: {pcf8574: outputs_9_16, number: 2, mode: OUTPUT, inverted: true}
+
+# --- Digitaleingänge X01..X16 (Endschalter/Kontakte, unkritisch) ---
+binary_sensor:
+  - platform: gpio
+    name: "KC868 X01"
+    pin: {pcf8574: inputs_1_8, number: 0, mode: INPUT, inverted: true}
+  - platform: gpio
+    name: "KC868 X02"
+    pin: {pcf8574: inputs_1_8, number: 1, mode: INPUT, inverted: true}
+  # ... X03..X16 bei Bedarf analog ergänzen (siehe Referenzkonfig im doku-Ordner)
+
+# Sicherer Bootzustand ist implizit garantiert:
+# Beim Start ist g_last_hb_ms=0 -> Watchdog NICHT ok -> arbitrate_outputs()
+# liefert ausschließlich die Abluft (Bit 10). Damit: alle Ventile/Pumpe/LED AUS,
+# Abluft EIN (thermischer Failsafe), bis der HMI-Heartbeat eintrifft.

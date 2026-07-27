@@ -1,0 +1,82 @@
+# packages/ble-sensors.yaml  (Knoten: greenhouse-hmi PRIMÄR, optional greenhouse-io)
+# Zwei Xiaomi-Thermometer (Gewächshaus + Raum).
+#
+# WICHTIG: Zuerst per Log das TATSÄCHLICHE Werbedatenformat bestimmen
+# (ATC Custom / ATC Mi-Like / PVVX / BTHome v2) und die passende Plattform
+# aktivieren. Unten ist die ATC-Variante aktiv (häufig bei „ATC/PVVX-Firmware").
+# Für BTHome v2 stattdessen `bthome`-Plattform bzw. den nativen HA-BTHome-Weg.
+# -> nicht allein wegen des Begriffs „ATC" raten. Siehe docs/commissioning Phase 5.
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: false        # passives Scannen reicht für Broadcast-Beacons
+
+globals:
+  - id: g_gh_last_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+sensor:
+  # --- Gewächshaus-Sensor (regelungsrelevant) ---
+  - platform: atc_mithermometer
+    mac_address: ${greenhouse_sensor_mac}
+    temperature:
+      name: "Gewächshaus Temperatur"
+      id: gh_temp
+      filters: [filter_out: nan]
+    humidity:
+      name: "Gewächshaus Luftfeuchte"
+      id: gh_rh
+      filters: [filter_out: nan]
+    battery_level:
+      name: "Gewächshaus Sensor Batterie"
+    battery_voltage:
+      name: "Gewächshaus Sensor Batteriespannung"
+    signal_strength:
+      name: "Gewächshaus Sensor RSSI"
+      id: gh_rssi
+
+  # --- Raum-Sensor (Referenz, ersetzt NICHT automatisch den GH-Sensor) ---
+  - platform: atc_mithermometer
+    mac_address: ${room_sensor_mac}
+    temperature:
+      name: "Raum Temperatur"
+      id: room_temp
+      filters: [filter_out: nan]
+    humidity:
+      name: "Raum Luftfeuchte"
+      id: room_rh
+      filters: [filter_out: nan]
+    battery_level:
+      name: "Raum Sensor Batterie"
+    signal_strength:
+      name: "Raum Sensor RSSI"
+      id: room_rssi
+
+  # Alter des letzten gültigen Gewächshaus-Pakets (Timeout/Plausibilität)
+  - platform: template
+    name: "Gewächshaus Sensor Alter"
+    id: gh_age
+    unit_of_measurement: "s"
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: 'return id(g_gh_last_ms) == 0 ? NAN : (millis() - id(g_gh_last_ms)) / 1000.0f;'
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          static float last_t = NAN;
+          if (!isnan(id(gh_temp).state) && id(gh_temp).state != last_t) {
+            id(g_gh_last_ms) = millis();
+            last_t = id(gh_temp).state;
+          }
+
+binary_sensor:
+  - platform: template
+    name: "BLE Gewächshaus online"
+    lambda: 'return id(g_gh_last_ms) != 0 && (millis() - id(g_gh_last_ms)) < ${sensor_timeout_s} * 1000UL;'
+  - platform: template
+    name: "BLE Raum online"
+    lambda: 'return !isnan(id(room_temp).state);'

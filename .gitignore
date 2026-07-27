@@ -1,0 +1,7 @@
+# Nur die Root-Dateien ignorieren — nodes/secrets.yaml ist ein Shim und MUSS committet bleiben
+/secrets.yaml
+/substitutions.yaml
+__pycache__/
+.pytest_cache/
+.esphome/
+.venv/

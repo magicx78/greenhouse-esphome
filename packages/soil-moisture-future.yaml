@@ -1,0 +1,45 @@
+# packages/soil-moisture-future.yaml  (Knoten: greenhouse-io) — NICHT AKTIV
+#
+# Vorbereitung für 2x ADS1115 (bis zu 8 kapazitive Topffeuchte-Sensoren).
+# ERST AKTIVIEREN, WENN HARDWARE VORHANDEN: dieses Package in greenhouse-io.yaml
+# einkommentieren und `${soil_enable}`-TODOs setzen.
+#
+# Nur korrosionsbeständige kapazitive/professionelle Sensoren verwenden — keine
+# blanken Widerstandssonden als Dauerlösung. Keine automatische Bewässerung ohne
+# Plausibilitätsprüfung (Kurzschluss/Leitungsbruch erkennen).
+
+# ---- Beispielhafte Struktur (auskommentiert lassen bis Hardware da ist) ----
+#
+# ads1115:
+#   - address: 0x48
+#     id: ads_a
+#   - address: 0x49
+#     id: ads_b
+#
+# sensor:
+#   - platform: ads1115
+#     ads1115_id: ads_a
+#     multiplexer: A0_GND
+#     gain: 6.144
+#     id: soil_raw_1
+#     name: "Topf 1 Rohspannung"
+#     update_interval: 10s
+#   # ... Kanäle A1..A3 an ads_a, A0..A3 an ads_b analog
+#
+#   - platform: template
+#     name: "Topf 1 Feuchte %"
+#     lambda: |-
+#       // invertierte Kennlinie: nass = niedrige Spannung
+#       float v = id(soil_raw_1).state;
+#       float dry = ${soil_1_dry_v};   // Kalibrier-Trockenwert
+#       float wet = ${soil_1_wet_v};   // Kalibrier-Nasswert
+#       if (isnan(v) || v <= 0.01) return NAN;              // Leitungsbruch
+#       float pct = (dry - v) / (dry - wet) * 100.0f;
+#       if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+#       return pct;
+#     unit_of_measurement: "%"
+#     update_interval: 10s
+
+# Platzhalter, damit die Datei als leeres Package gültig ist:
+substitutions:
+  _soil_future_note: "inaktiv bis ADS1115-Hardware vorhanden"

@@ -1,0 +1,3 @@
+# HAOS-Wrapper für greenhouse-io — siehe Kommentar in kc868-a16.yaml
+packages:
+  node: !include greenhouse-esphome/nodes/greenhouse-io.yaml

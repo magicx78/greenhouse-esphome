@@ -1,0 +1,108 @@
+# packages/irrigation.yaml  (Knoten: greenhouse-hmi)
+# Sicherer Zonen-Sequencer für 8 Ventile. Setzt g_irrig_mask (Bits 0..8), das
+# climate-control.yaml in die Modbus-requested-Maske einmischt. Der KC868
+# erzwingt die Interlocks zusätzlich hardwarenah (safety.yaml).
+
+globals:
+  - id: g_irrig_mask        # Bits 0..7 Ventile, Bit 8 Pumpe
+    type: uint16_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_irrig_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: g_daily_irrig_s
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+
+number:
+  - platform: template
+    name: "Ventil-Laufzeit"
+    id: irrig_valve_time
+    unit_of_measurement: "s"
+    min_value: 1
+    max_value: ${valve_max_time_s}
+    step: 1
+    initial_value: "20"
+    restore_value: true
+    optimistic: true
+  - platform: template
+    name: "Aktive Zone (0=keine)"
+    id: irrig_zone
+    min_value: 0
+    max_value: 8
+    step: 1
+    initial_value: "0"
+    optimistic: true
+
+script:
+  # Ablauf einer Zone: Ventil auf -> Pumpe vor -> laufen -> Pumpe aus ->
+  # Nachlauf -> Ventil zu. Reihenfolge dokumentiert in README/wiring.
+  - id: run_zone
+    mode: single
+    parameters:
+      zone: int
+    then:
+      - lambda: |-
+          if (zone < 1 || zone > 8) return;
+          if (id(data_stale).state) { ESP_LOGW("irrig","abbruch: sensor stale"); return; }
+          id(g_irrig_active) = true;
+          id(g_irrig_mask) = (1 << (zone - 1));           // Ventil auf
+      - delay: ${pump_pre_run_s}s                          # Vorlaufzeit
+      - lambda: 'id(g_irrig_mask) |= (1 << 8);'            # Pumpe an
+      - delay: !lambda 'return (uint32_t) id(irrig_valve_time).state * 1000;'
+      - lambda: 'id(g_irrig_mask) &= ~(1 << 8);'           # Pumpe aus
+      - delay: ${pump_post_run_s}s                          # Nachlauf
+      - lambda: |-
+          id(g_daily_irrig_s) += (uint32_t) id(irrig_valve_time).state;
+          id(g_irrig_mask) = 0;                            // Ventil zu
+          id(g_irrig_active) = false;
+
+  - id: stop_irrigation
+    then:
+      - script.stop: run_zone
+      - lambda: |-
+          id(g_irrig_mask) = 0;
+          id(g_irrig_active) = false;
+
+button:
+  - platform: template
+    name: "Bewässerung abbrechen"
+    on_press:
+      - script.execute: stop_irrigation
+  - platform: template
+    name: "Alle Ventile schließen"
+    on_press:
+      - script.execute: stop_irrigation
+  - platform: template
+    name: "Zone starten"
+    on_press:
+      - script.execute:
+          id: run_zone
+          zone: !lambda 'return (int) id(irrig_zone).state;'
+
+binary_sensor:
+  - platform: template
+    name: "Bewässerung aktiv"
+    lambda: 'return id(g_irrig_active);'
+
+sensor:
+  - platform: template
+    name: "Tagesbewässerungszeit"
+    unit_of_measurement: "s"
+    accuracy_decimals: 0
+    lambda: 'return id(g_daily_irrig_s);'
+    update_interval: 30s
+
+# Tages-Reset um Mitternacht
+time:
+  - platform: sntp
+    id: !extend sntp_time
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        then:
+          - lambda: 'id(g_daily_irrig_s) = 0;'

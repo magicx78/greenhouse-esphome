@@ -1,0 +1,230 @@
+# packages/climate-control.yaml  (Knoten: greenhouse-hmi)
+# VPD-Berechnung, Sollwerte, prioritätsbasierter Supervisor.
+# Erwartet Sensor-IDs: gh_temp, gh_rh (Gewächshaus), room_temp, room_rh (Raum),
+# gh_age (Alter des Gewächshaus-Pakets in s). Greift auf External Component
+# `id(gh_ctrl)` (greenhouse_controller) zu und schreibt Sollzustände in die
+# Modbus-Register des KC868 (mb_requested / mb_heartbeat / mb_seq / mb_mode).
+
+# --- Sollwerte (persistiert) ---
+number:
+  - platform: template
+    name: "Zieltemperatur"
+    id: sp_target_temp
+    unit_of_measurement: "°C"
+    min_value: 10
+    max_value: 40
+    step: 0.5
+    restore_value: true
+    initial_value: ${default_target_temperature}
+    optimistic: true
+  - platform: template
+    name: "Maximaltemperatur"
+    id: sp_max_temp
+    unit_of_measurement: "°C"
+    min_value: 20
+    max_value: 45
+    step: 0.5
+    restore_value: true
+    initial_value: ${default_max_temperature}
+    optimistic: true
+  - platform: template
+    name: "Minimaltemperatur"
+    id: sp_min_temp
+    unit_of_measurement: "°C"
+    min_value: 5
+    max_value: 25
+    step: 0.5
+    restore_value: true
+    initial_value: ${default_min_temperature}
+    optimistic: true
+  - platform: template
+    name: "VPD-Ziel"
+    id: sp_target_vpd
+    unit_of_measurement: "kPa"
+    min_value: 0.4
+    max_value: 2.0
+    step: 0.05
+    restore_value: true
+    initial_value: ${default_target_vpd}
+    optimistic: true
+  - platform: template
+    name: "VPD-Totband"
+    id: sp_vpd_deadband
+    unit_of_measurement: "kPa"
+    min_value: 0.05
+    max_value: 0.5
+    step: 0.05
+    restore_value: true
+    initial_value: ${default_vpd_deadband}
+    optimistic: true
+  - platform: template
+    name: "Blatt-Offset"
+    id: sp_leaf_offset
+    unit_of_measurement: "K"
+    min_value: -5
+    max_value: 2
+    step: 0.5
+    restore_value: true
+    initial_value: ${leaf_temperature_offset}
+    optimistic: true
+
+select:
+  - platform: template
+    name: "Betriebsmodus"
+    id: sp_mode
+    options: ["OFF", "MANUAL", "AUTO_TEMPERATURE", "AUTO_VPD", "IRRIGATION", "EMERGENCY", "MAINTENANCE"]
+    initial_option: "OFF"
+    restore_value: true
+    optimistic: true
+  - platform: template
+    name: "Pflanzenprofil"
+    id: sp_profile
+    options: ["Keimling", "Wachstum", "Bluete", "Benutzerdefiniert"]
+    initial_option: "Wachstum"
+    restore_value: true
+    optimistic: true
+
+# --- Abgeleitete Klimawerte (VPD etc.) ---
+sensor:
+  - platform: template
+    name: "VPD Luft"
+    id: vpd_air
+    unit_of_measurement: "kPa"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      if (isnan(id(gh_temp).state) || isnan(id(gh_rh).state)) return NAN;
+      return id(gh_ctrl).vpd_air(id(gh_temp).state, id(gh_rh).state);
+  - platform: template
+    name: "VPD Blatt (Schätzung)"
+    id: vpd_leaf
+    unit_of_measurement: "kPa"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      if (isnan(id(gh_temp).state) || isnan(id(gh_rh).state)) return NAN;
+      id(gh_ctrl).setpoints().leaf_offset = id(sp_leaf_offset).state;
+      return id(gh_ctrl).vpd_leaf(id(gh_temp).state, id(gh_rh).state);
+  - platform: template
+    name: "Taupunkt"
+    id: dew_point
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: |-
+      if (isnan(id(gh_temp).state) || isnan(id(gh_rh).state)) return NAN;
+      return id(gh_ctrl).dew_point(id(gh_temp).state, id(gh_rh).state);
+  - platform: template
+    name: "Absolute Feuchte"
+    unit_of_measurement: "g/m³"
+    accuracy_decimals: 1
+    update_interval: 10s
+    lambda: |-
+      if (isnan(id(gh_temp).state) || isnan(id(gh_rh).state)) return NAN;
+      return id(gh_ctrl).abs_humidity(id(gh_temp).state, id(gh_rh).state);
+  - platform: template
+    name: "VPD-Abweichung"
+    unit_of_measurement: "kPa"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: 'return isnan(id(vpd_leaf).state) ? NAN : id(vpd_leaf).state - id(sp_target_vpd).state;'
+  - platform: template
+    name: "Diff GH-Raum Temperatur"
+    unit_of_measurement: "K"
+    accuracy_decimals: 1
+    update_interval: 10s
+    lambda: |-
+      if (isnan(id(gh_temp).state) || isnan(id(room_temp).state)) return NAN;
+      return id(gh_temp).state - id(room_temp).state;
+
+binary_sensor:
+  - platform: template
+    name: "Sensorwerte veraltet"
+    id: data_stale
+    lambda: |-
+      return isnan(id(gh_temp).state) || isnan(id(gh_rh).state) ||
+             id(gh_age).state > ${sensor_timeout_s};
+  - platform: template
+    name: "Notfall aktiv"
+    id: emergency_active
+    lambda: 'return id(sp_mode).state == "EMERGENCY";'
+
+# --- Supervisor: läuft lokal, unabhängig von HA ---
+globals:
+  - id: g_hb_counter
+    type: uint16_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_desired_humidifier
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: g_desired_dehumidifier
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: g_desired_fan_pct
+    type: float
+    restore_value: false
+    initial_value: '25.0'
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          using namespace esphome::greenhouse_controller;
+          // Sollwerte an Controller übergeben
+          auto &sp = id(gh_ctrl).setpoints();
+          sp.target_temp = id(sp_target_temp).state;
+          sp.min_temp = id(sp_min_temp).state;
+          sp.max_temp = id(sp_max_temp).state;
+          sp.emergency_temp = ${emergency_temperature};
+          sp.target_vpd = id(sp_target_vpd).state;
+          sp.vpd_deadband = id(sp_vpd_deadband).state;
+          sp.leaf_offset = id(sp_leaf_offset).state;
+          sp.max_humidity = ${default_max_humidity};
+
+          // Modus aus Select
+          std::string m = id(sp_mode).state;
+          Mode mode = MODE_OFF;
+          if (m == "MANUAL") mode = MODE_MANUAL;
+          else if (m == "AUTO_TEMPERATURE") mode = MODE_AUTO_TEMPERATURE;
+          else if (m == "AUTO_VPD") mode = MODE_AUTO_VPD;
+          else if (m == "IRRIGATION") mode = MODE_IRRIGATION;
+          else if (m == "EMERGENCY") mode = MODE_EMERGENCY;
+          else if (m == "MAINTENANCE") mode = MODE_MAINTENANCE;
+
+          float age = isnan(id(gh_age).state) ? 1e9 : id(gh_age).state;
+          Actions a = id(gh_ctrl).supervise(mode, id(gh_temp).state, id(gh_rh).state,
+                                             age, ${sensor_timeout_s}, /*comm_ok=*/true);
+
+          // Sollzustände puffern (an greenhouse-io / IR / Steckdose weitergereicht)
+          id(g_desired_humidifier) = a.humidifier;
+          id(g_desired_dehumidifier) = a.dehumidifier;
+          id(g_desired_fan_pct) = a.recirc_fan_pct;
+
+          // Ausgangs-Bitmaske für KC868 bilden (LED Bit9, Abluft Bit10)
+          uint16_t req = 0;
+          if (a.led_allowed && id(g_light_on)) req |= (1 << 9);   // Licht: Supervisor UND Zeitplan/Kalibrierung
+          if (a.exhaust)     req |= (1 << 10);
+          // Bewässerungsbits (0..8) setzt irrigation.yaml separat via g_irrig_mask
+          req |= id(g_irrig_mask);
+
+          // Heartbeat hochzählen
+          id(g_hb_counter) = id(g_hb_counter) + 1;
+
+          // In Modbus-Register schreiben (siehe modbus_controller im Node-File)
+          id(mb_requested).make_call().set_value((float) req).perform();
+          id(mb_heartbeat).make_call().set_value((float) id(g_hb_counter)).perform();
+          id(mb_mode).make_call().set_value((float) mode).perform();
+
+# Sollzustände für greenhouse-io als HA-Entities (unkritischer Pfad)
+switch:
+  - platform: template
+    name: "Sollwert Luftbefeuchter"
+    id: desired_humidifier_sw
+    lambda: 'return id(g_desired_humidifier);'
+    turn_on_action:
+      - lambda: 'id(g_desired_humidifier) = true;'
+    turn_off_action:
+      - lambda: 'id(g_desired_humidifier) = false;'

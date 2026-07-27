@@ -1,0 +1,125 @@
+# nodes/greenhouse-io.yaml — ESP32-S3 DevKit: Lüfter, HX711, IR, Servo
+# Alle Pins TODO_AFTER_PIN_AUDIT (Board final wählen, siehe hardware-pin-audit.md).
+
+substitutions:
+  node_name: "greenhouse-io"
+
+esphome:
+  name: ${node_name}
+  friendly_name: "Gewächshaus IO"
+
+esp32:
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+packages:
+  subs: !include ../substitutions.yaml
+  common: !include ../packages/common.yaml
+  diagnostics: !include ../packages/diagnostics.yaml
+  fans: !include ../packages/fans.yaml
+  weight: !include ../packages/weight.yaml
+  # soil_future: !include ../packages/soil-moisture-future.yaml   # erst mit Hardware
+  # ble: !include ../packages/ble-sensors.yaml                    # optional (Entity-Namen anpassen!)
+
+api:
+  encryption:
+    key: !secret api_key_io
+
+# ---- IR: Empfänger (Lernen) + Sender (Treiber-Transistor!) ----
+remote_receiver:
+  id: ir_rx
+  pin:
+    number: ${ir_rx_pin}
+    inverted: true
+    mode:
+      input: true
+      pullup: true
+  dump: all              # zum Lernen: alle Protokolle loggen
+  tolerance: 25%
+
+remote_transmitter:
+  id: ir_tx
+  pin: ${ir_tx_pin}
+  carrier_duty_percent: 50%
+
+globals:
+  - id: g_ir_learn
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: g_humidifier_assumed   # 0=unbekannt,1=aus,2=an (assumed state)
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+switch:
+  - platform: template
+    name: "IR Lernmodus"
+    id: ir_learn_sw
+    optimistic: true
+    on_turn_on:
+      - lambda: 'id(g_ir_learn) = true;'
+    on_turn_off:
+      - lambda: 'id(g_ir_learn) = false;'
+
+button:
+  - platform: template
+    name: "IR testen (Power)"
+    on_press:
+      - logger.log: "TODO: gelernten Power-Code senden (siehe docs/ir-codes.md)"
+      # Nach dem Lernen hier z.B.:
+      # - remote_transmitter.transmit_nec: { address: 0x..., command: 0x... }
+
+text_sensor:
+  - platform: template
+    name: "Luftbefeuchter (assumed)"
+    lambda: |-
+      switch (id(g_humidifier_assumed)) {
+        case 1: return {"AUS"};
+        case 2: return {"AN"};
+        default: return {"unbekannt"};
+      }
+    update_interval: 5s
+
+# ---- Servo für mechanischen LED-Dimmer ----
+# servo_min/max_level = TODO_CALIBRATE -> Config schlägt fehl bis kalibriert.
+output:
+  - platform: ledc
+    id: servo_pwm
+    pin: ${servo_pin}
+    frequency: 50 Hz
+
+servo:
+  - id: dimmer_servo
+    output: servo_pwm
+    min_level: ${servo_min_level}
+    max_level: ${servo_max_level}
+    auto_detach_time: 2s        # Servo nach Positionierung stromlos (kein Dauerlast)
+    transition_length: 1s       # langsame Bewegung
+
+number:
+  - platform: template
+    name: "Servo Sollposition %"
+    id: io_servo_target
+    min_value: 0
+    max_value: 100
+    step: 1
+    initial_value: "0"
+    optimistic: true
+    on_value:
+      - servo.write:
+          id: dimmer_servo
+          level: !lambda 'return (x / 100.0f) * 2.0f - 1.0f;'   # 0..100% -> -1..1
+
+# Lern-Logging: empfangene Codes im Lernmodus ausgeben
+# (remote_receiver `dump: all` schreibt sie bereits ins Log; hier zusätzlich
+#  ein Marker, damit klar ist wann Lernmodus aktiv war)
+interval:
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(g_ir_learn);'
+          then:
+            - logger.log: "IR-Lernmodus aktiv: Fernbedienungstaste drücken, Code aus Log nach docs/ir-codes.md übertragen."

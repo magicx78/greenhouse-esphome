@@ -1,0 +1,66 @@
+# substitutions.example.yaml
+# Kopiere nach substitutions.yaml und trage die realen Werte ein.
+#
+# WICHTIG: Alle Werte mit "TODO_AFTER_PIN_AUDIT" sind ABSICHTLICH ungültige
+# Pin-Platzhalter. `esphome config` schlägt fehl, solange sie nicht durch echte
+# GPIOs ersetzt sind -> natürliche Sperre gegen versehentliches Produktiv-Flashen.
+# Zusätzlich prüft `python3 tests/check_no_todo.py` auf verbliebene TODOs.
+
+substitutions:
+  # --- Hardware-Revisionen (von der Platine ablesen) ---
+  waveshare_revision: "TODO"            # V1 | V2 | V3 | V4
+  kc868_revision: "TODO"
+
+  # --- Netzwerk / Ziel ---
+  ha_dev_server: "10.10.10.205"         # HA-Dev-Server (nur Info)
+
+  # --- BLE-Thermometer MACs (in secrets.yaml besser aufgehoben) ---
+  greenhouse_sensor_mac: "TODO"         # z.B. "A4:C1:38:xx:xx:xx"
+  room_sensor_mac: "TODO"
+
+  # --- greenhouse-io Pins (nach Board-Wahl + Audit setzen) ---
+  fan_1_pwm_pin: "TODO_AFTER_PIN_AUDIT"
+  fan_1_tach_pin: "TODO_AFTER_PIN_AUDIT"
+  fan_2_pwm_pin: "TODO_AFTER_PIN_AUDIT"
+  fan_2_tach_pin: "TODO_AFTER_PIN_AUDIT"
+  fan_pulses_per_revolution: "2"
+  fan_min_percent: "25"
+  fan_start_boost_seconds: "3"
+
+  hx711_dout_pin: "TODO_AFTER_PIN_AUDIT"
+  hx711_clk_pin: "TODO_AFTER_PIN_AUDIT"
+
+  ir_tx_pin: "TODO_AFTER_PIN_AUDIT"
+  ir_rx_pin: "TODO_AFTER_PIN_AUDIT"
+
+  servo_pin: "TODO_AFTER_PIN_AUDIT"
+  servo_min_level: "TODO_CALIBRATE"     # z.B. "-0.6"
+  servo_max_level: "TODO_CALIBRATE"     # z.B. "0.6"
+
+  # --- HMI RS485 (revisionsabhängig, aus Schaltplan) ---
+  hmi_rs485_tx: "TODO_AFTER_PIN_AUDIT"
+  hmi_rs485_rx: "TODO_AFTER_PIN_AUDIT"
+  hmi_rs485_de: "TODO_AFTER_PIN_AUDIT"  # falls Flow-Control-Pin nötig
+
+  # --- Modbus ---
+  modbus_baud_rate: "19200"
+  modbus_server_address: "1"
+  watchdog_time_s: "10"
+
+  # --- Klima-Defaults ---
+  default_target_temperature: "25.0"
+  default_min_temperature: "18.0"
+  default_max_temperature: "30.0"
+  emergency_temperature: "35.0"
+  default_target_vpd: "1.0"
+  default_vpd_deadband: "0.1"
+  leaf_temperature_offset: "-1.0"
+  default_max_humidity: "80.0"
+  sensor_timeout_s: "120"
+
+  # --- Bewässerung ---
+  valve_max_time_s: "120"
+  pump_pre_run_s: "2"
+  pump_post_run_s: "3"
+  max_active_valves: "1"
+  daily_irrigation_max_s: "1800"
