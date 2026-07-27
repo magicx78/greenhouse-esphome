@@ -1,0 +1,12 @@
+# packages/network-wifi.yaml — Netzwerkmodus "wifi" (Übergangs-/Testbetrieb)
+#
+# WLAN, AP-Fallback und reboot_timeout kommen unverändert aus common.yaml;
+# Ethernet wird in diesem Modus gar nicht erst eingebunden, der LAN8720 des
+# KC868 bleibt ungenutzt.
+#
+# Auswahl über ${network_mode} in substitutions.yaml. Für den Dauerbetrieb des
+# KC868 ist Ethernet vorgesehen (docs/architecture.md) — WLAN ist der Notnagel,
+# solange kein LAN-Kabel liegt. Die Grundregelung läuft ohnehin netzunabhängig.
+
+esphome:
+  comment: "Netzwerk: WLAN"

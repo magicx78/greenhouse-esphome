@@ -1,0 +1,25 @@
+# packages/network-ethernet.yaml — Netzwerkmodus "ethernet" (Design-Vorgabe, docs/architecture.md)
+#
+# LAN8720-Pins bestätigt aus docs/hardware-pin-audit.md — nicht ändern.
+# ESPHome erlaubt wifi: und ethernet: nicht gleichzeitig, daher wird das WLAN
+# aus common.yaml hier entfernt (kein WLAN-Fallback möglich), ebenso der
+# WiFi-RSSI-Diagnosesensor aus diagnostics.yaml.
+#
+# Auswahl über ${network_mode} in substitutions.yaml.
+
+esphome:
+  comment: "Netzwerk: Ethernet (LAN8720)"
+
+wifi: !remove
+
+sensor:
+  - id: !remove diag_wifi_rssi
+
+ethernet:
+  type: LAN8720
+  mdc_pin: GPIO23
+  mdio_pin: GPIO18
+  clk:
+    pin: GPIO17
+    mode: CLK_OUT
+  phy_addr: 0

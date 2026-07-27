@@ -16,32 +16,19 @@ esp32:
     type: esp-idf
 
 # Board-übergreifende Basis + Diagnose
-# subs zuerst: zentrale Substitutions (Node-eigene gewinnen bei Konflikt)
+# subs zuerst: zentrale Substitutions (Node-eigene gewinnen bei Konflikt).
+# network zuletzt: der Modus darf wifi/Sensoren aus den vorigen Paketen entfernen.
+# Umschalten über network_mode (ethernet|wifi) in substitutions.yaml.
 packages:
   subs: !include ../substitutions.yaml
   common: !include ../packages/common.yaml
   diagnostics: !include ../packages/diagnostics.yaml
   safety: !include ../packages/safety.yaml
+  network: !include ../packages/network-${network_mode}.yaml
 
 api:
   encryption:
     key: !secret api_key_kc868
-
-# Ethernet bestätigt (LAN8720). ESPHome erlaubt wifi+ethernet nicht zusammen —
-# das WLAN aus common.yaml wird hier entfernt (kein Fallback möglich), ebenso
-# der WiFi-RSSI-Diagnosesensor aus diagnostics.yaml.
-wifi: !remove
-
-sensor:
-  - id: !remove diag_wifi_rssi
-ethernet:
-  type: LAN8720
-  mdc_pin: GPIO23
-  mdio_pin: GPIO18
-  clk:
-    pin: GPIO17
-    mode: CLK_OUT
-  phy_addr: 0
 
 # I²C für die PCF8574-Expander (bestätigt GPIO4/5)
 i2c:
