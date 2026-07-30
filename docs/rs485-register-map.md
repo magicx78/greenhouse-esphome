@@ -82,11 +82,32 @@ machten das teuer bis gefährlich:
    den Function Code **nicht** vergleicht. Leserange und Schreibbefehl auf
    0x0023 galten damit als derselbe Befehl und verdrängten einander.
 
-Beides zusammen staute die Kommandowarteschlange auf (`Duplicate modbus command
-found`) und streckte den Heartbeat-Takt von 1 s auf ~4 s — bei einem Watchdog
-von `${watchdog_time_s}` s. Geschrieben wird deshalb direkt per
+Geschrieben wird deshalb direkt per
 `queue_command(ModbusCommandItem::create_write_single_command(...))` aus dem
 Supervisor in `packages/climate-control.yaml`.
+
+### Zeitverhalten des Busses (gemessen, nicht geschätzt)
+
+Der Knoten reiht pro Sekunde 5 Befehle ein: 3 Schreibvorgänge plus 2 Leseranges.
+Damit die Warteschlange leerläuft, muss der Bus mehr als 5 Befehle/s schaffen.
+Drei ESPHome-Defaults stehen dem entgegen und sind deshalb im Node-File
+ausdrücklich gesetzt:
+
+| Option | Default | hier | Wirkung |
+|---|---|---|---|
+| `send_wait_time` | 2000 ms | 250 ms | Wartezeit auf eine Antwort; jeder verlorene Frame blockierte den Bus 2 s |
+| `turnaround_time` | **600 ms** | 50 ms | Sendesperre **nach jeder** Transaktion — der eigentliche Durchsatz-Deckel |
+
+Mit den Defaults wurden ~660 ms je Befehl gemessen, also ~1,5 Befehle/s bei 5
+eingereihten — die Warteschlange lief dauerhaft über (`Duplicate modbus command
+found`) und der Heartbeat erreichte den Server statt jede Sekunde nur alle ~3–4 s,
+bei einem Watchdog von `${watchdog_time_s}` s.
+
+Die Turnaround-Verzögerung stammt aus der Modbus-Spezifikation und gilt dort dem
+**Broadcast** (Adresse 0), damit alle Server den Befehl verarbeiten können. Hier
+wird ausschließlich unicast auf Adresse 1 gesprochen; die Antwort beendet die
+Transaktion. Wer den Bus später auf mehrere Server erweitert oder Broadcasts
+einführt, muss diesen Wert neu bewerten.
 
 Die Bestätigung, dass ein Schreibvorgang angekommen ist, liefert nicht ein
 Rücklesen, sondern die drei Leseregister: `comm_status` Bit 0 (Watchdog läuft),

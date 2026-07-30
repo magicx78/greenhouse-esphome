@@ -120,10 +120,22 @@ modbus:
     #
     # ESPHomes Default ist 2000ms. Bei 19200 8N1 ist eine 7-Byte-Antwort nach
     # ~4 ms komplett; zwei Sekunden Wartezeit machen aus jedem verlorenen Frame
-    # einen Bus-Stillstand, in dem sich die Kommandowarteschlange aufstaut
-    # (genau das erzeugte die "Duplicate modbus command"-Flut). 250 ms lassen
-    # dem KC868 noch reichlich Luft — sein Loop braucht im Mittel unter 50 ms.
+    # einen Bus-Stillstand. 250 ms lassen dem KC868 noch reichlich Luft — sein
+    # Loop braucht im Mittel unter 50 ms.
     send_wait_time: 250ms
+    # DAS hier war der eigentliche Durchsatz-Deckel: ESPHomes Default ist
+    # 600ms. `ModbusClientHub::tx_delay_remaining()` sperrt den Sendekanal
+    # frame_delay + turnaround_time lang nach jedem Senden UND nach jedem
+    # empfangenen Byte — also nach JEDER Transaktion. Gemessen: ~660 ms je
+    # Befehl, d.h. ~1,5 Befehle/s, während der Knoten 5/s einreiht. Die
+    # Warteschlange lief damit dauerhaft über ("Duplicate modbus command").
+    # Die Turnaround-Verzögerung stammt aus der Modbus-Spezifikation und gilt
+    # dort dem BROADCAST (Adresse 0), damit alle Server den Befehl verarbeiten
+    # können. Hier wird ausschließlich Adresse ${modbus_server_address} unicast
+    # angesprochen, und die Antwort beendet die Transaktion ohnehin. 50 ms sind
+    # bei ~10 ms Transaktionsdauer noch reichlich konservativ und lassen ~15
+    # Befehle/s zu — Faktor 3 über dem, was dieser Knoten braucht.
+    turnaround_time: 50ms
 
 modbus_controller:
   - id: kc868
