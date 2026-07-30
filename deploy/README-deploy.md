@@ -21,15 +21,15 @@ sudo cp /config/esphome/greenhouse-esphome/deploy/haos-wrappers/*.yaml /config/e
 **Voraussetzung für die CLI:** Beim SSH-Add-on den **Protection Mode ausschalten**
 (Einstellungen → Apps → Advanced SSH & Web Terminal → Info), sonst gibt es kein
 `docker`. Die SSH-Session läuft als User `test` (uid 1000) → Docker/Git immer mit
-`sudo` (passwortlos). Der Builder-Container heißt hier `addon_5c53de3b_esphome-dev`
+`sudo` (passwortlos). Der Builder-Container heißt hier `app_5c53de3b_esphome-dev`
 (ESPHome Device Builder **dev**-Channel; bei anderem Add-on `docker ps | grep esphome`).
 
 **Update + Validieren + Kompilieren:**
 
 ```bash
 sudo git -C /config/esphome/greenhouse-esphome pull
-sudo docker exec addon_5c53de3b_esphome-dev esphome config  /config/esphome/greenhouse-esphome/nodes/kc868-a16.yaml
-sudo docker exec addon_5c53de3b_esphome-dev esphome compile /config/esphome/greenhouse-esphome/nodes/kc868-a16.yaml
+sudo docker exec app_5c53de3b_esphome-dev esphome config  /config/esphome/greenhouse-esphome/nodes/kc868-a16.yaml
+sudo docker exec app_5c53de3b_esphome-dev esphome compile /config/esphome/greenhouse-esphome/nodes/kc868-a16.yaml
 ```
 
 **Netzwerkmodus des KC868:** `network_mode` im `substitutions:`-Block von

@@ -82,8 +82,25 @@ esphome compile nodes/greenhouse-io.yaml
 > `TODO_AFTER_PIN_AUDIT`-Platzhalter als Pins stehen — das ist die Sperre.
 
 > Auf dem HAOS-Dev-Server laufen die `esphome`-Kommandos per
-> `sudo docker exec addon_5c53de3b_esphome-dev esphome …` — Details und
-> Einrichtung: `deploy/README-deploy.md` (Weg A).
+> `sudo docker exec app_5c53de3b_esphome-dev esphome …` — Details und
+> Einrichtung: `deploy/README-deploy.md` (Weg A). Das Präfix hat mit dem
+> Supervisor-Umbau von `addon_` auf `app_` gewechselt; im Zweifel
+> `sudo docker ps` fragen statt raten.
+
+## Knoten ansprechen
+
+Die Knoten hängen an der dynamischen DHCP-Vergabe und haben ihre Adressen schon
+einmal gewechselt (KC868 .123 → .126, HMI .184 → .179 — die .184 gehört
+inzwischen einem fremden Gerät). **Deshalb für OTA und Logs die mDNS-Namen
+benutzen, nicht die IP:**
+
+```bash
+esphome logs nodes/greenhouse-hmi.yaml --device greenhouse-hmi.local
+esphome run  nodes/kc868-a16.yaml     --device kc868-a16.local
+```
+
+Home Assistant findet die Knoten ohnehin per zeroconf; beide sind auf dem
+Dev-Server (10.10.10.205) eingebunden.
 
 ## Flash-Reihenfolge (Erstinbetriebnahme)
 
@@ -105,6 +122,21 @@ Danach dem stufenweisen **Inbetriebnahmeplan** folgen: `docs/commissioning.md`
 
 Siehe `docs/rs485-register-map.md` (überlappungsfrei, getestet).
 `19200 8N1`, Server-Adresse 1, HMI=Client, KC868=Server.
+
+### Offene Abweichung: Sequenzregister 0x0020
+
+Der Registerplan nennt unter „Arbitrierung / Interlocks" als Regel 5, ein Befehl
+werde nur akzeptiert, wenn unter anderem **die Sequenz neu** ist. Das ist derzeit
+weder implementiert noch benutzt: Der HMI schreibt `command_sequence` (0x0020)
+nie, `g_cmd_seq`/`g_ack_seq` in `packages/safety.yaml` bleiben auf 0, und
+`greenhouse::arbitrate_outputs()` kennt gar keinen Sequenzparameter. Das
+Fehlerbit `SEQUENCE_STALE` (Bit 2) wird nie gesetzt.
+
+Praktisch schützt heute allein der Heartbeat-Watchdog (0x0004/0x0022) — das ist
+Invariante 3 und funktioniert. Die Sequenzprüfung wäre der zusätzliche Schutz
+gegen *wiederholte alte* Befehle. Sie nachzuziehen ist eine Änderung an der
+Arbitrierungslogik und folgt deshalb dem Kernprinzip: **erst `tests/ghlib.py`
+plus Tests, dann der C++-Spiegel, dann `safety.yaml` und der HMI-Client.**
 
 ## Noch benötigte reale Messwerte / Hardwareangaben (Deliverable #14)
 

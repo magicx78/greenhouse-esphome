@@ -60,6 +60,13 @@ konkurrierenden PIDs.
 - HMI-Node mit mipi_rgb/GT911/LVGL-Grundgerüst + Modbus-Client + Supervisor
 - greenhouse-io-Node (Lüfter/HX711/IR/Servo) mit TODO-Pin-Platzhaltern
 - Alle 9 Doku-Dateien, Build-Guard, Deploy-Skript + HAOS-Wrapper
+- **RS485-Strecke läuft am echten Gerät** (2026-07-30): `comm_status = 5`,
+  `error_bitmask = 0`, `active_output_mask = 1024` — Invariante 2 und 3 am
+  laufenden Aufbau bestätigt
+- **Beide Knoten sind in der Dev-HA eingebunden** (zeroconf, keine manuelle
+  Konfiguration nötig) und liefern dort ihre Entities
+- Modbus-Polling entdoppelt: 0x0004/0x0010/0x0023 werden fire-and-forget
+  geschrieben statt als `number` gepollt (`docs/rs485-register-map.md`)
 
 ⏳ Offen (nächste Schritte, in dieser Reihenfolge):
 1. `bash deploy/install-dev-server.sh` auf dem Dev-Server → `esphome config
@@ -72,6 +79,22 @@ konkurrierenden PIDs.
    Licht, Lüfter, Bewässerung, Gewicht, Sensoren, Kalibrierung, Diagnose,
    Einstellungen (Muster in `nodes/greenhouse-hmi.yaml`)
 5. Inbetriebnahme streng nach `docs/commissioning.md` Phase 1–11
+
+**Vorher aber:** Der HMI muss einmal **per USB** neu bespielt werden. Die
+Partitionstabelle wechselt von 4 MB auf 16 MB (`flash_size: 16MB`), und
+Partitionsänderungen gehen grundsätzlich nicht per OTA. Solange das nicht
+passiert ist, kann die App-Partition (1,75 MB, zuletzt 85,8 % voll) keine
+weiteren LVGL-Seiten aufnehmen — Punkt 4 hängt also an diesem Flash.
+
+## Chip-spezifische Build-Optionen (Falle)
+
+`minimum_chip_revision` und `sram1_as_iram` gelten in ESPHome **nur für die
+ESP32-Classic-Variante**; für jede andere Variante wirft die Validierung
+`cv.Invalid`. Sie stehen deshalb im KC868-Knoten (ESP32-D0WD-V3 Rev 3.1) und
+sind auf dem HMI (ESP32-S3) nicht setzbar — auch wenn das Build-Log sie
+allgemein vorschlägt. `minimum_chip_revision` bindet die Firmware an die
+Chip-Revision: Nach einem Platinentausch zuerst prüfen, sonst bootet das neue
+Board stumm nicht.
 
 ## Zukunft / Roadmap
 

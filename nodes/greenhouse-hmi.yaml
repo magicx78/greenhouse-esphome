@@ -198,9 +198,17 @@ button:
       - lambda: 'ESP_LOGI("hmi","Alarm quittiert (Schutzaktion bleibt aktiv)");'
 
 # ============================ LVGL UI ============================
-# Kompakte, erweiterbare Oberfläche (480x480). Übersicht + Navigation.
-# Weitere Seiten (Licht/Lüfter/Gewicht/Sensoren/Kalibrierung/Diagnose/
-# Einstellungen) nach diesem Muster ergänzen.
+# 480x480, GT911. Aufteilung — dieselbe auf JEDER Seite:
+#   y   0.. 40  Alarmleiste (top_layer, nur bei Alarm sichtbar)
+#   y  46..404  Seiteninhalt (Titel bei y=46, Zeilen ab y=86 im Raster von 34)
+#   y 408..480  Navigationsleiste (top_layer, immer sichtbar)
+# Der Inhalt beginnt bewusst unter der Alarmleiste: Ein Alarm darf Messwerte
+# überlagern, aber die Seitenüberschrift soll nicht verschwinden.
+#
+# Neue Seiten nach diesem Muster: Seite unter `pages:` anlegen, Labels ohne
+# Werte vorbelegen ("--"), im 1s-Interval unten befüllen, Navigationsknopf
+# ergänzen. Es fehlen noch: Bewässerung, Gewicht, Sensoren, Kalibrierung,
+# Einstellungen.
 lvgl:
   displays:
     - main_display
@@ -215,14 +223,16 @@ lvgl:
     label:
       text_font: montserrat_20
   top_layer:
-    # Alarm-Statusleiste (auf jeder Seite sichtbar)
     widgets:
+      # Alarm-Statusleiste (auf jeder Seite sichtbar)
       - obj:
           id: alarm_bar
           align: TOP_MID
           width: 480
           height: 40
           bg_color: 0xB00020
+          border_width: 0
+          pad_all: 0
           hidden: true
           widgets:
             - label:
@@ -230,40 +240,333 @@ lvgl:
                 align: CENTER
                 text: "ALARM"
                 text_color: 0xFFFFFF
+      # Navigationsleiste (auf jeder Seite sichtbar)
+      - obj:
+          id: nav_bar
+          align: BOTTOM_MID
+          width: 480
+          height: 72
+          bg_color: 0x202020
+          border_width: 0
+          pad_all: 0
+          widgets:
+            - button:
+                id: nav_overview
+                align: LEFT_MID
+                x: 4
+                width: 112
+                height: 60
+                widgets:
+                  - label: { align: CENTER, text: "Übersicht", text_font: montserrat_14 }
+                on_click:
+                  - lvgl.page.show: page_overview
+            - button:
+                id: nav_climate
+                align: LEFT_MID
+                x: 122
+                width: 112
+                height: 60
+                widgets:
+                  - label: { align: CENTER, text: "Klima", text_font: montserrat_14 }
+                on_click:
+                  - lvgl.page.show: page_climate
+            - button:
+                id: nav_lightfan
+                align: LEFT_MID
+                x: 240
+                width: 112
+                height: 60
+                widgets:
+                  - label: { align: CENTER, text: "Licht/Luft", text_font: montserrat_14 }
+                on_click:
+                  - lvgl.page.show: page_lightfan
+            - button:
+                id: nav_diag
+                align: LEFT_MID
+                x: 358
+                width: 112
+                height: 60
+                widgets:
+                  - label: { align: CENTER, text: "Diagnose", text_font: montserrat_14 }
+                on_click:
+                  - lvgl.page.show: page_diag
   pages:
+    # ---------------------------------------------------------------- Übersicht
     - id: page_overview
       widgets:
-        - label: { align: TOP_MID, y: 8, text: "Gewächshaus – Übersicht" }
-        - label: { id: lbl_temp, align: LEFT_MID, x: 20, y: -80, text: "T: -- °C" }
-        - label: { id: lbl_rh,   align: LEFT_MID, x: 20, y: -40, text: "RH: -- %" }
-        - label: { id: lbl_vpd,  align: LEFT_MID, x: 20, y: 0,   text: "VPD: -- kPa" }
-        - label: { id: lbl_mode, align: LEFT_MID, x: 20, y: 40,  text: "Modus: --" }
-        - label: { id: lbl_rs485, align: LEFT_MID, x: 20, y: 80, text: "RS485: --" }
+        - label: { align: TOP_MID, y: 46, text: "Gewächshaus – Übersicht" }
+        - label: { id: lbl_temp,    align: TOP_LEFT, x: 16, y: 86,  text: "T: -- °C" }
+        - label: { id: lbl_rh,      align: TOP_LEFT, x: 16, y: 120, text: "RH: -- %" }
+        - label: { id: lbl_vpd,     align: TOP_LEFT, x: 16, y: 154, text: "VPD: -- kPa" }
+        - label: { id: lbl_mode,    align: TOP_LEFT, x: 16, y: 188, text: "Modus: --" }
+        - label: { id: lbl_rs485,   align: TOP_LEFT, x: 16, y: 222, text: "RS485: --" }
+        - label: { id: lbl_outputs, align: TOP_LEFT, x: 16, y: 256, text: "Aus: --" }
         - button:
             id: btn_mode_auto
-            align: BOTTOM_MID
-            y: -20
-            width: 300
-            height: 56
+            align: TOP_LEFT
+            x: 16
+            y: 306
+            width: 216
+            height: 72
             widgets:
               - label: { align: CENTER, text: "AUTO_VPD" }
             on_click:
               - lambda: 'id(sp_mode).make_call().set_option("AUTO_VPD").perform();'
+        - button:
+            id: btn_emergency
+            align: TOP_LEFT
+            x: 248
+            y: 306
+            width: 216
+            height: 72
+            bg_color: 0xB00020
+            widgets:
+              - label: { align: CENTER, text: "NOT-AUS", text_color: 0xFFFFFF }
+            on_click:
+              - lambda: 'id(sp_mode).make_call().set_option("EMERGENCY").perform();'
+
+    # -------------------------------------------------------------------- Klima
+    - id: page_climate
+      widgets:
+        - label: { align: TOP_MID, y: 46, text: "Klima" }
+        - label: { id: lbl_c_temp,  align: TOP_LEFT, x: 16, y: 86,  text: "T: -- °C" }
+        - label: { id: lbl_c_rh,    align: TOP_LEFT, x: 16, y: 120, text: "RH: -- %" }
+        - label: { id: lbl_c_dew,   align: TOP_LEFT, x: 16, y: 154, text: "Taupunkt: -- °C" }
+        - label: { id: lbl_c_vpda,  align: TOP_LEFT, x: 16, y: 188, text: "VPD Luft: -- kPa" }
+        - label: { id: lbl_c_vpdl,  align: TOP_LEFT, x: 16, y: 222, text: "VPD Blatt: -- kPa" }
+        # Ziel-VPD (Schritt 0.05 kPa, Grenzen wie die number-Entität)
+        - label: { id: lbl_c_spvpd, align: TOP_LEFT, x: 16, y: 262, text: "Ziel-VPD: -- kPa" }
+        - button:
+            id: btn_vpd_dn
+            align: TOP_LEFT
+            x: 316
+            y: 254
+            width: 68
+            height: 56
+            widgets:
+              - label: { align: CENTER, text: "-" }
+            on_click:
+              - lambda: |-
+                  float v = id(sp_target_vpd).state - 0.05f;
+                  if (v < 0.4f) v = 0.4f;
+                  id(sp_target_vpd).make_call().set_value(v).perform();
+        - button:
+            id: btn_vpd_up
+            align: TOP_LEFT
+            x: 392
+            y: 254
+            width: 68
+            height: 56
+            widgets:
+              - label: { align: CENTER, text: "+" }
+            on_click:
+              - lambda: |-
+                  float v = id(sp_target_vpd).state + 0.05f;
+                  if (v > 2.0f) v = 2.0f;
+                  id(sp_target_vpd).make_call().set_value(v).perform();
+        # Zieltemperatur (Schritt 0.5 K)
+        - label: { id: lbl_c_sptemp, align: TOP_LEFT, x: 16, y: 330, text: "Ziel-T: -- °C" }
+        - button:
+            id: btn_temp_dn
+            align: TOP_LEFT
+            x: 316
+            y: 322
+            width: 68
+            height: 56
+            widgets:
+              - label: { align: CENTER, text: "-" }
+            on_click:
+              - lambda: |-
+                  float v = id(sp_target_temp).state - 0.5f;
+                  if (v < 10.0f) v = 10.0f;
+                  id(sp_target_temp).make_call().set_value(v).perform();
+        - button:
+            id: btn_temp_up
+            align: TOP_LEFT
+            x: 392
+            y: 322
+            width: 68
+            height: 56
+            widgets:
+              - label: { align: CENTER, text: "+" }
+            on_click:
+              - lambda: |-
+                  float v = id(sp_target_temp).state + 0.5f;
+                  if (v > 40.0f) v = 40.0f;
+                  id(sp_target_temp).make_call().set_value(v).perform();
+
+    # ------------------------------------------------------------- Licht/Lüfter
+    - id: page_lightfan
+      widgets:
+        - label: { align: TOP_MID, y: 46, text: "Licht & Lüfter" }
+        - label: { id: lbl_l_state, align: TOP_LEFT, x: 16, y: 86,  text: "Licht: --" }
+        # Ohne gültige Servo-Kalibrierung bleibt die LED aus (Invariante 7).
+        # Deshalb steht der Kalibrierstatus direkt neben dem Lichtzustand.
+        - label: { id: lbl_l_cal,   align: TOP_LEFT, x: 16, y: 120, text: "Servo-Kal.: --" }
+        - label: { id: lbl_l_sched, align: TOP_LEFT, x: 16, y: 154, text: "Tag: --" }
+        - label: { id: lbl_l_fan,   align: TOP_LEFT, x: 16, y: 188, text: "Umluft: -- %" }
+        - label: { id: lbl_l_bright, align: TOP_LEFT, x: 16, y: 236, text: "Helligkeit: -- %" }
+        - button:
+            id: btn_bright_dn
+            align: TOP_LEFT
+            x: 316
+            y: 228
+            width: 68
+            height: 56
+            widgets:
+              - label: { align: CENTER, text: "-" }
+            on_click:
+              - lambda: |-
+                  float v = id(light_brightness).state - 5.0f;
+                  if (v < 0.0f) v = 0.0f;
+                  id(light_brightness).make_call().set_value(v).perform();
+        - button:
+            id: btn_bright_up
+            align: TOP_LEFT
+            x: 392
+            y: 228
+            width: 68
+            height: 56
+            widgets:
+              - label: { align: CENTER, text: "+" }
+            on_click:
+              - lambda: |-
+                  float v = id(light_brightness).state + 5.0f;
+                  if (v > 100.0f) v = 100.0f;
+                  id(light_brightness).make_call().set_value(v).perform();
+        - button:
+            id: btn_light_toggle
+            align: TOP_LEFT
+            x: 16
+            y: 306
+            width: 216
+            height: 72
+            widgets:
+              - label: { align: CENTER, text: "Licht manuell" }
+            on_click:
+              - lambda: 'id(light_manual).toggle();'
+        - button:
+            id: btn_light_off
+            align: TOP_LEFT
+            x: 248
+            y: 306
+            width: 216
+            height: 72
+            widgets:
+              - label: { align: CENTER, text: "Licht AUS" }
+            on_click:
+              - lambda: |-
+                  id(g_light_on) = false;
+                  id(light_manual).turn_off();
+
+    # ----------------------------------------------------------------- Diagnose
+    - id: page_diag
+      widgets:
+        - label: { align: TOP_MID, y: 46, text: "Diagnose" }
+        - label: { id: lbl_d_rs485, align: TOP_LEFT, x: 16, y: 86,  text: "RS485: --" }
+        - label: { id: lbl_d_comm,  align: TOP_LEFT, x: 16, y: 116, text: "Comm: --" }
+        - label: { id: lbl_d_err,   align: TOP_LEFT, x: 16, y: 146, text: "Fehler: --" }
+        - label: { id: lbl_d_out,   align: TOP_LEFT, x: 16, y: 176, text: "Aktiv: --" }
+        - label: { id: lbl_d_age,   align: TOP_LEFT, x: 16, y: 206, text: "Sensoralter: -- s" }
+        - label: { id: lbl_d_heap,  align: TOP_LEFT, x: 16, y: 236, text: "Heap: -- B" }
+        - label: { id: lbl_d_rssi,  align: TOP_LEFT, x: 16, y: 266, text: "RSSI: -- dBm" }
+        - label: { id: lbl_d_up,    align: TOP_LEFT, x: 16, y: 296, text: "Uptime: -- s" }
+        - button:
+            id: btn_rs485_resync
+            align: TOP_LEFT
+            x: 16
+            y: 330
+            width: 448
+            height: 60
+            widgets:
+              - label: { align: CENTER, text: "RS485 neu synchronisieren" }
+            on_click:
+              - lambda: 'id(g_hb_counter) = 0;'
 
 # Live-Aktualisierung der LVGL-Labels + Alarmleiste
 interval:
   - interval: 1s
     then:
       - lambda: |-
-          char buf[32];
+          char buf[48];
+
+          // --- Übersicht ---
           snprintf(buf, sizeof(buf), "T: %.1f °C", id(gh_temp).state);
           lv_label_set_text(id(lbl_temp), buf);
+          lv_label_set_text(id(lbl_c_temp), buf);
           snprintf(buf, sizeof(buf), "RH: %.0f %%", id(gh_rh).state);
           lv_label_set_text(id(lbl_rh), buf);
+          lv_label_set_text(id(lbl_c_rh), buf);
           snprintf(buf, sizeof(buf), "VPD: %.2f kPa", id(vpd_leaf).state);
           lv_label_set_text(id(lbl_vpd), buf);
           lv_label_set_text(id(lbl_mode), (std::string("Modus: ") + id(sp_mode).current_option().str()).c_str());
           lv_label_set_text(id(lbl_rs485), id(rs485_online).state ? "RS485: OK" : "RS485: FEHLER");
+
+          // Aktive Ausgänge als Kurzform (Bitbelegung: docs/rs485-register-map.md)
+          uint16_t act = id(mb_active_mask).has_state() ? (uint16_t) id(mb_active_mask).state : 0;
+          std::string outs;
+          for (int i = 0; i < 8; i++)
+            if (act & (1 << i)) { outs += "V"; outs += std::to_string(i + 1); outs += " "; }
+          if (act & (1 << 8))  outs += "Pumpe ";
+          if (act & (1 << 9))  outs += "LED ";
+          if (act & (1 << 10)) outs += "Abluft ";
+          if (outs.empty()) outs = "keine";
+          lv_label_set_text(id(lbl_outputs), ("Aus: " + outs).c_str());
+          lv_label_set_text(id(lbl_d_out), ("Aktiv: " + outs).c_str());
+
+          // --- Klima ---
+          snprintf(buf, sizeof(buf), "Taupunkt: %.1f °C", id(dew_point).state);
+          lv_label_set_text(id(lbl_c_dew), buf);
+          snprintf(buf, sizeof(buf), "VPD Luft: %.2f kPa", id(vpd_air).state);
+          lv_label_set_text(id(lbl_c_vpda), buf);
+          snprintf(buf, sizeof(buf), "VPD Blatt: %.2f kPa", id(vpd_leaf).state);
+          lv_label_set_text(id(lbl_c_vpdl), buf);
+          snprintf(buf, sizeof(buf), "Ziel-VPD: %.2f kPa", id(sp_target_vpd).state);
+          lv_label_set_text(id(lbl_c_spvpd), buf);
+          snprintf(buf, sizeof(buf), "Ziel-T: %.1f °C", id(sp_target_temp).state);
+          lv_label_set_text(id(lbl_c_sptemp), buf);
+
+          // --- Licht & Lüfter ---
+          lv_label_set_text(id(lbl_l_state), id(g_light_on) ? "Licht: EIN" : "Licht: AUS");
+          lv_label_set_text(id(lbl_l_cal), id(g_servo_cal_valid) ? "Servo-Kal.: gültig"
+                                                                : "Servo-Kal.: UNGÜLTIG -> LED bleibt aus");
+          snprintf(buf, sizeof(buf), "Tag: ab %d Uhr, %d h",
+                   (int) id(light_day_start).state, (int) id(light_day_hours).state);
+          lv_label_set_text(id(lbl_l_sched), buf);
+          snprintf(buf, sizeof(buf), "Umluft: %.0f %%", id(g_desired_fan_pct));
+          lv_label_set_text(id(lbl_l_fan), buf);
+          snprintf(buf, sizeof(buf), "Helligkeit: %.0f %%", id(light_brightness).state);
+          lv_label_set_text(id(lbl_l_bright), buf);
+
+          // --- Diagnose ---
+          lv_label_set_text(id(lbl_d_rs485), id(rs485_online).state ? "RS485: OK" : "RS485: FEHLER");
+
+          uint16_t comm = id(mb_comm_status).has_state() ? (uint16_t) id(mb_comm_status).state : 0;
+          std::string cs;
+          if (comm & 1) cs += "WD-ok ";
+          if (comm & 2) cs += "Write-ok ";
+          if (comm & 4) cs += "Client-gesehen ";
+          if (cs.empty()) cs = "-";
+          lv_label_set_text(id(lbl_d_comm), ("Comm: " + cs).c_str());
+
+          // Fehlerbits ausgeschrieben statt als nackte Zahl (Tabelle im Registerplan)
+          uint16_t err = id(mb_error_mask).has_state() ? (uint16_t) id(mb_error_mask).state : 0;
+          static const char *const ERR_NAMES[6] = {
+              "Watchdog", "Register", "Sequenz", "Sperre", "Ventilzeit", "Pumpenzeit"};
+          std::string es;
+          for (int i = 0; i < 6; i++)
+            if (err & (1 << i)) { es += ERR_NAMES[i]; es += " "; }
+          if (es.empty()) es = "keine";
+          lv_label_set_text(id(lbl_d_err), ("Fehler: " + es).c_str());
+
+          snprintf(buf, sizeof(buf), "Sensoralter: %.0f s", id(gh_age).state);
+          lv_label_set_text(id(lbl_d_age), buf);
+          snprintf(buf, sizeof(buf), "Heap: %.0f B", id(diag_free_heap).state);
+          lv_label_set_text(id(lbl_d_heap), buf);
+          snprintf(buf, sizeof(buf), "RSSI: %.0f dBm", id(diag_wifi_rssi).state);
+          lv_label_set_text(id(lbl_d_rssi), buf);
+          snprintf(buf, sizeof(buf), "Uptime: %.0f s", id(diag_uptime).state);
+          lv_label_set_text(id(lbl_d_up), buf);
       - if:
           condition:
             lambda: 'return id(emergency_active).state || id(data_stale).state || !id(rs485_online).state;'
