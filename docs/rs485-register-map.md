@@ -64,6 +64,34 @@ Der Plan ist überlappungsfrei (verifiziert durch `tests/test_register_map.py`).
 | 4 | VALVE_MAX_TIME überschritten |
 | 5 | PUMP_MAX_TIME überschritten |
 
+## Wie der Client die Register bedient (Polling-Schema)
+
+Der HMI liest zyklisch **nur** die Leseregister: `comm_status` (0x0005) und
+`error_bitmask` (0x0006) — von ESPHome zu einem Bereichsbefehl zusammengefasst —
+sowie `active_output_mask` (0x0011).
+
+Die Schreibregister `last_master_heartbeat` (0x0004), `requested_output_mask`
+(0x0010) und `operating_mode` (0x0023) werden **fire-and-forget geschrieben und
+bewusst nicht zurückgelesen**. Sie sind deshalb *keine* `number`-Entitäten: Eine
+`modbus_controller`-Entität würde ihr Register immer auch pollen. Zwei Effekte
+machten das teuer bis gefährlich:
+
+1. ESPHome fasst benachbarte Adressen zu einem Bereichsbefehl zusammen — 0x0004
+   landete mit 0x0005/0x0006 in einem Lesebefehl, 0x0010 mit 0x0011.
+2. `ModbusController::queue_command()` erkennt Duplikate über `is_equal()`, das
+   den Function Code **nicht** vergleicht. Leserange und Schreibbefehl auf
+   0x0023 galten damit als derselbe Befehl und verdrängten einander.
+
+Beides zusammen staute die Kommandowarteschlange auf (`Duplicate modbus command
+found`) und streckte den Heartbeat-Takt von 1 s auf ~4 s — bei einem Watchdog
+von `${watchdog_time_s}` s. Geschrieben wird deshalb direkt per
+`queue_command(ModbusCommandItem::create_write_single_command(...))` aus dem
+Supervisor in `packages/climate-control.yaml`.
+
+Die Bestätigung, dass ein Schreibvorgang angekommen ist, liefert nicht ein
+Rücklesen, sondern die drei Leseregister: `comm_status` Bit 0 (Watchdog läuft),
+`error_bitmask` und `active_output_mask`.
+
 ## Wichtiger Hinweis zu `active_output_mask` (0x0011)
 
 Der Wert bezeichnet **ausschließlich den intern gesetzten, logischen

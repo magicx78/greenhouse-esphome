@@ -26,6 +26,19 @@ esp32:
   toolchain: platformio
   framework:
     type: esp-idf
+    advanced:
+      # ACHTUNG — Board-Bindung: Mit dieser Angabe startet die Firmware NICHT
+      # mehr auf einem ESP32 älter als Rev 3.1. Das verbaute Board ist per
+      # esptool und per Device-Info-Entity als Rev 3.1 bestätigt (MAC
+      # 2c:bc:bb:63:d5:e8). Wird die Platine je getauscht, muss dieser Wert
+      # zuerst gegen den neuen Chip geprüft werden — sonst bootet er stumm
+      # nicht. Nutzen: ESP-IDF lässt die Errata-Workarounds für ältere
+      # Revisionen aus dem Image weg.
+      minimum_chip_revision: "3.1"
+      # Gibt die SRAM1-Region als IRAM frei (+40 KB). Nur auf der
+      # ESP32-Classic-Variante verfügbar — auf dem S3 des HMI wirft ESPHome
+      # dafür cv.Invalid, dort also nicht setzbar.
+      sram1_as_iram: true
 
 # Board-übergreifende Basis + Diagnose
 # subs zuerst: zentrale Substitutions (Node-eigene gewinnen bei Konflikt).
