@@ -59,6 +59,21 @@ number:
     restore_value: true
     initial_value: ${default_vpd_deadband}
     optimistic: true
+  # Obergrenze, kein Zielwert: Ab hier greift Priorität 6 (MAX_RH) und schaltet
+  # Abluft + Entfeuchter ein. War bisher die Konstante ${default_max_humidity};
+  # als number ist es zur Laufzeit verstellbar, ohne dass sich an der Regel
+  # etwas ändert — `max_humidity` ist in tests/ghlib.py und im C++-Spiegel
+  # längst ein Setpoint-Feld.
+  - platform: template
+    name: "Maximale Luftfeuchte"
+    id: sp_max_humidity
+    unit_of_measurement: "%"
+    min_value: 40
+    max_value: 95
+    step: 1
+    restore_value: true
+    initial_value: ${default_max_humidity}
+    optimistic: true
   - platform: template
     name: "Blatt-Offset"
     id: sp_leaf_offset
@@ -184,7 +199,7 @@ interval:
           sp.target_vpd = id(sp_target_vpd).state;
           sp.vpd_deadband = id(sp_vpd_deadband).state;
           sp.leaf_offset = id(sp_leaf_offset).state;
-          sp.max_humidity = ${default_max_humidity};
+          sp.max_humidity = id(sp_max_humidity).state;
 
           // Modus aus Select
           std::string m = id(sp_mode).current_option().str();

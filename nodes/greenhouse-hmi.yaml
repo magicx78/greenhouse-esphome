@@ -201,6 +201,34 @@ globals:
     type: uint32_t
     restore_value: false
     initial_value: '0'
+  # false = Temperatur, true = Feuchte (Seite "Werte")
+  - id: g_tf_mode
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Tagesextreme. Bewusst NICHT persistiert: `restore_value` schriebe bei jedem
+  # neuen Extremwert in den Flash, und das passiert am Tagesanfang im
+  # Minutentakt. Nach einem Neustart beginnt die Messung eben neu.
+  - id: g_t_min
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_t_max
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_rh_min
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_rh_max
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_mm_yday
+    type: int
+    restore_value: false
+    initial_value: '-1'
 
 button:
   - platform: template
@@ -230,6 +258,13 @@ button:
 # Werte vorbelegen ("--"), im 1s-Interval unten befüllen, Navigationsknopf
 # ergänzen. Ab neun Seiten reicht die zweireihige Leiste nicht mehr — dann
 # braucht es eine Menüseite statt weiterer Knöpfe.
+#
+# Seiten: Übersicht · Klima · Licht/Luft · Bewässerung · Werte · Kalibrierung ·
+# Einstellungen · Diagnose. "Werte" ersetzt die frühere reine Sensorliste: Sie
+# zeigt Ist-Wert, Tageshöchst- und -tiefstwert und den zugehörigen Sollwert für
+# wahlweise Temperatur ODER Feuchte — der Umschaltknopf wechselt alles auf
+# einmal, inklusive dessen, was -/+ verstellt. Die Sensorgesundheit (Batterie,
+# RSSI, Paketalter) steht dort als Fußzeile statt auf einer eigenen Seite.
 #
 # Eine Seite "Gewicht" fehlt bewusst: Die HX711-Waage lebt in
 # packages/weight.yaml auf greenhouse-io, ist auf diesem Knoten nicht
@@ -324,16 +359,16 @@ lvgl:
                 on_click:
                   - lvgl.page.show: page_irrigation
             - button:
-                id: nav_sensors
+                id: nav_values
                 align: TOP_LEFT
                 x: 4
                 y: 50
                 width: 112
                 height: 42
                 widgets:
-                  - label: { align: CENTER, text: "Sensoren", text_font: montserrat_14 }
+                  - label: { align: CENTER, text: "Werte", text_font: montserrat_14 }
                 on_click:
-                  - lvgl.page.show: page_sensors
+                  - lvgl.page.show: page_values
             - button:
                 id: nav_calib
                 align: TOP_LEFT
@@ -632,21 +667,89 @@ lvgl:
             on_click:
               - script.execute: stop_irrigation
 
-    # ----------------------------------------------------------------- Sensoren
-    # Dichte Tabelle -> hier bewusst montserrat_14 statt des Theme-Fonts.
-    - id: page_sensors
+    # ------------------------------------------------------- Temperatur/Feuchte
+    # Eine Seite für beide Größen statt zweier halbleerer. Der Umschaltknopf
+    # wechselt, WAS gezeigt und WAS mit -/+ verstellt wird — Ist-Wert, Tages-
+    # extreme und Sollwert wechseln gemeinsam.
+    #
+    # Wichtig bei der Feuchte: `sp_max_humidity` ist eine OBERGRENZE, kein
+    # Zielwert. Ab ihr greift Priorität 6 (MAX_RH) und schaltet Abluft und
+    # Entfeuchter ein. Deshalb steht dort "Max. Feuchte" und nicht "Soll".
+    - id: page_values
       widgets:
-        - label: { align: TOP_MID, y: 46, text: "Sensoren" }
-        - label: { id: lbl_s_gh_hdr,  align: TOP_LEFT, x: 16, y: 84,  text: "Gewächshaus", text_font: montserrat_14 }
-        - label: { id: lbl_s_gh_t,    align: TOP_LEFT, x: 32, y: 112, text: "Temperatur: --", text_font: montserrat_14 }
-        - label: { id: lbl_s_gh_rh,   align: TOP_LEFT, x: 32, y: 140, text: "Luftfeuchte: --", text_font: montserrat_14 }
-        - label: { id: lbl_s_gh_batt, align: TOP_LEFT, x: 32, y: 168, text: "Batterie: --", text_font: montserrat_14 }
-        - label: { id: lbl_s_gh_rssi, align: TOP_LEFT, x: 32, y: 196, text: "RSSI: --", text_font: montserrat_14 }
-        - label: { id: lbl_s_gh_age,  align: TOP_LEFT, x: 32, y: 224, text: "Letztes Paket: --", text_font: montserrat_14 }
-        - label: { id: lbl_s_rm_hdr,  align: TOP_LEFT, x: 16, y: 258, text: "Raum (Referenz)", text_font: montserrat_14 }
-        - label: { id: lbl_s_rm_t,    align: TOP_LEFT, x: 32, y: 286, text: "Temperatur: --", text_font: montserrat_14 }
-        - label: { id: lbl_s_rm_rh,   align: TOP_LEFT, x: 32, y: 314, text: "Luftfeuchte: --", text_font: montserrat_14 }
-        - label: { id: lbl_s_rm_batt, align: TOP_LEFT, x: 32, y: 342, text: "Batterie: --", text_font: montserrat_14 }
+        - label: { id: lbl_v_title, align: TOP_MID, y: 46, text: "Temperatur" }
+        - label: { id: lbl_v_cap, align: TOP_LEFT, x: 16, y: 80, text: "Ist-Wert Gewächshaus", text_font: montserrat_14 }
+        - label: { id: lbl_v_ist, align: TOP_MID, y: 100, text: "--", text_font: montserrat_40 }
+        - label: { id: lbl_v_max, align: TOP_LEFT, x: 16,  y: 158, text: "Höchst: --", text_font: montserrat_14 }
+        - label: { id: lbl_v_min, align: TOP_LEFT, x: 250, y: 158, text: "Niedrigst: --", text_font: montserrat_14 }
+        - label: { id: lbl_v_room, align: TOP_LEFT, x: 16, y: 184, text: "Raum: --", text_font: montserrat_14 }
+        - label: { id: lbl_v_health, align: TOP_LEFT, x: 16, y: 210, text: "Sensor: --", text_font: montserrat_14 }
+        - label: { id: lbl_v_spcap, align: TOP_LEFT, x: 16, y: 238, text: "Sollwert", text_font: montserrat_14 }
+        - button:
+            id: btn_v_dn
+            align: TOP_LEFT
+            x: 16
+            y: 258
+            width: 80
+            height: 60
+            widgets:
+              - label: { align: CENTER, text: "-" }
+            on_click:
+              - lambda: |-
+                  if (id(g_tf_mode)) {
+                    float v = id(sp_max_humidity).state - 1.0f;
+                    if (v < 40.0f) v = 40.0f;
+                    id(sp_max_humidity).make_call().set_value(v).perform();
+                  } else {
+                    float v = id(sp_target_temp).state - 0.5f;
+                    if (v < 10.0f) v = 10.0f;
+                    id(sp_target_temp).make_call().set_value(v).perform();
+                  }
+        - label: { id: lbl_v_sp, align: TOP_MID, y: 272, text: "--", text_font: montserrat_28 }
+        - button:
+            id: btn_v_up
+            align: TOP_LEFT
+            x: 384
+            y: 258
+            width: 80
+            height: 60
+            widgets:
+              - label: { align: CENTER, text: "+" }
+            on_click:
+              - lambda: |-
+                  if (id(g_tf_mode)) {
+                    float v = id(sp_max_humidity).state + 1.0f;
+                    if (v > 95.0f) v = 95.0f;
+                    id(sp_max_humidity).make_call().set_value(v).perform();
+                  } else {
+                    float v = id(sp_target_temp).state + 0.5f;
+                    if (v > 40.0f) v = 40.0f;
+                    id(sp_target_temp).make_call().set_value(v).perform();
+                  }
+        - button:
+            id: btn_v_toggle
+            align: TOP_LEFT
+            x: 16
+            y: 326
+            width: 290
+            height: 48
+            widgets:
+              - label: { id: lbl_v_toggle, align: CENTER, text: "Umschalten: Feuchte" }
+            on_click:
+              - lambda: 'id(g_tf_mode) = !id(g_tf_mode);'
+        - button:
+            id: btn_v_reset
+            align: TOP_LEFT
+            x: 316
+            y: 326
+            width: 148
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "Min/Max", text_font: montserrat_14 }
+            on_click:
+              - lambda: |-
+                  id(g_t_min) = NAN; id(g_t_max) = NAN;
+                  id(g_rh_min) = NAN; id(g_rh_max) = NAN;
 
     # -------------------------------------------------------------- Kalibrierung
     # Invariante 7: Die LED darf nur bei gültiger Servo-Kalibrierung an. Ohne
@@ -938,24 +1041,66 @@ interval:
           snprintf(buf, sizeof(buf), "Laufzeit: %.0f s", id(irrig_valve_time).state);
           lv_label_set_text(id(lbl_i_time), buf);
 
-          // --- Sensoren ---
-          snprintf(buf, sizeof(buf), "Temperatur: %.2f °C", id(gh_temp).state);
-          lv_label_set_text(id(lbl_s_gh_t), buf);
-          snprintf(buf, sizeof(buf), "Luftfeuchte: %.2f %%", id(gh_rh).state);
-          lv_label_set_text(id(lbl_s_gh_rh), buf);
-          snprintf(buf, sizeof(buf), "Batterie: %.0f %%", id(gh_batt).state);
-          lv_label_set_text(id(lbl_s_gh_batt), buf);
-          snprintf(buf, sizeof(buf), "RSSI: %.0f dBm", id(gh_rssi).state);
-          lv_label_set_text(id(lbl_s_gh_rssi), buf);
-          if (isnan(id(gh_age).state)) lv_label_set_text(id(lbl_s_gh_age), "Letztes Paket: nie");
-          else { snprintf(buf, sizeof(buf), "Letztes Paket: vor %.0f s", id(gh_age).state);
-                 lv_label_set_text(id(lbl_s_gh_age), buf); }
-          snprintf(buf, sizeof(buf), "Temperatur: %.2f °C", id(room_temp).state);
-          lv_label_set_text(id(lbl_s_rm_t), buf);
-          snprintf(buf, sizeof(buf), "Luftfeuchte: %.2f %%", id(room_rh).state);
-          lv_label_set_text(id(lbl_s_rm_rh), buf);
-          snprintf(buf, sizeof(buf), "Batterie: %.0f %%", id(room_batt).state);
-          lv_label_set_text(id(lbl_s_rm_batt), buf);
+          // --- Seite "Werte": Tagesextreme fortschreiben ---
+          // Reset beim Tageswechsel über day_of_year statt über einen zweiten
+          // on_time-Trigger: packages/irrigation.yaml erweitert `sntp_time`
+          // bereits per !extend, ein zweites !extend derselben ID wäre fragil.
+          {
+            auto tnow = id(sntp_time).now();
+            int yday = tnow.is_valid() ? tnow.day_of_year : -1;
+            if (yday > 0 && yday != id(g_mm_yday)) {
+              id(g_mm_yday) = yday;
+              id(g_t_min) = NAN; id(g_t_max) = NAN;
+              id(g_rh_min) = NAN; id(g_rh_max) = NAN;
+            }
+          }
+          float vt = id(gh_temp).state, vr = id(gh_rh).state;
+          if (!isnan(vt)) {
+            if (isnan(id(g_t_min)) || vt < id(g_t_min)) id(g_t_min) = vt;
+            if (isnan(id(g_t_max)) || vt > id(g_t_max)) id(g_t_max) = vt;
+          }
+          if (!isnan(vr)) {
+            if (isnan(id(g_rh_min)) || vr < id(g_rh_min)) id(g_rh_min) = vr;
+            if (isnan(id(g_rh_max)) || vr > id(g_rh_max)) id(g_rh_max) = vr;
+          }
+
+          bool feu = id(g_tf_mode);
+          lv_label_set_text(id(lbl_v_title), feu ? "Luftfeuchte" : "Temperatur");
+          lv_label_set_text(id(lbl_v_toggle), feu ? "Umschalten: Temperatur" : "Umschalten: Feuchte");
+
+          float ist   = feu ? vr : vt;
+          float vmin  = feu ? id(g_rh_min) : id(g_t_min);
+          float vmax  = feu ? id(g_rh_max) : id(g_t_max);
+          const char *unit = feu ? "%" : "°C";
+          int dec = feu ? 0 : 1;
+
+          if (isnan(ist)) lv_label_set_text(id(lbl_v_ist), "--");
+          else { snprintf(buf, sizeof(buf), "%.*f %s", dec, ist, unit);
+                 lv_label_set_text(id(lbl_v_ist), buf); }
+          if (isnan(vmax)) lv_label_set_text(id(lbl_v_max), "Höchst: --");
+          else { snprintf(buf, sizeof(buf), "Höchst: %.*f %s", dec, vmax, unit);
+                 lv_label_set_text(id(lbl_v_max), buf); }
+          if (isnan(vmin)) lv_label_set_text(id(lbl_v_min), "Niedrigst: --");
+          else { snprintf(buf, sizeof(buf), "Niedrigst: %.*f %s", dec, vmin, unit);
+                 lv_label_set_text(id(lbl_v_min), buf); }
+
+          if (feu) {
+            snprintf(buf, sizeof(buf), "Max. Feuchte: %.0f %%", id(sp_max_humidity).state);
+          } else {
+            snprintf(buf, sizeof(buf), "Ziel: %.1f °C", id(sp_target_temp).state);
+          }
+          lv_label_set_text(id(lbl_v_sp), buf);
+          lv_label_set_text(id(lbl_v_spcap), feu ? "Obergrenze (löst Entfeuchten aus)" : "Zieltemperatur");
+
+          if (isnan(id(room_temp).state)) lv_label_set_text(id(lbl_v_room), "Raum: kein Empfang");
+          else { snprintf(buf, sizeof(buf), "Raum: %.1f °C · %.0f %%",
+                          id(room_temp).state, id(room_rh).state);
+                 lv_label_set_text(id(lbl_v_room), buf); }
+
+          if (isnan(id(gh_age).state)) lv_label_set_text(id(lbl_v_health), "Sensor: noch kein Paket");
+          else { snprintf(buf, sizeof(buf), "Batt %.0f %% · %.0f dBm · vor %.0f s",
+                          id(gh_batt).state, id(gh_rssi).state, id(gh_age).state);
+                 lv_label_set_text(id(lbl_v_health), buf); }
 
           // --- Kalibrierung ---
           lv_label_set_text(id(lbl_k_state), id(g_servo_cal_valid) ? "Servo-Kalibrierung: gültig"
