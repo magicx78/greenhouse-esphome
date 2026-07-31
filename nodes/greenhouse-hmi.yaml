@@ -8,6 +8,55 @@ substitutions:
 esphome:
   name: ${node_name}
   friendly_name: "Gewächshaus HMI"
+  # LVGL-Chart freischalten. ESPHome kennt `chart` NICHT als Widget und setzt
+  # deshalb beim Generieren von lv_conf.h alle unbenutzten LV_USE_* auf 0 —
+  # inklusive LV_USE_CHART. `lvgl/__init__.py` durchsucht aber ausdrücklich die
+  # Build-Flags nach `-DLV_USE_*` und lässt so markierte Defines dann in Ruhe.
+  # Ohne diese Zeile bricht der Build im Chart-Lambda mit undefinierten
+  # lv_chart_*-Symbolen ab. Aufgebaut wird das Chart per C-API (siehe on_boot).
+  platformio_options:
+    build_flags:
+      - "-DLV_USE_CHART=1"
+  # Chart erst aufbauen, wenn LVGL fertig eingerichtet ist (-100 läuft nach
+  # allen setup()-Methoden). Die Puffer werden hier auf LV_CHART_POINT_NONE
+  # gesetzt, damit die Kurve links leer beginnt statt bei 0 zu kleben.
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          for (int i = 0; i < 288; i++) {
+            id(g_c_t)[i] = LV_CHART_POINT_NONE;
+            id(g_c_rh)[i] = LV_CHART_POINT_NONE;
+            id(g_c_spt)[i] = LV_CHART_POINT_NONE;
+            id(g_c_sprh)[i] = LV_CHART_POINT_NONE;
+          }
+          lv_obj_t *ch = lv_chart_create(id(chart_holder));
+          id(g_chart) = ch;
+          lv_obj_set_size(ch, 444, 136);
+          lv_obj_center(ch);
+          lv_chart_set_type(ch, LV_CHART_TYPE_LINE);
+          lv_chart_set_point_count(ch, 288);
+          lv_chart_set_div_line_count(ch, 5, 7);
+          // Zehntel-Skalierung: 100..400 = 10,0..40,0 °C, 0..1000 = 0..100,0 %
+          lv_chart_set_axis_range(ch, LV_CHART_AXIS_PRIMARY_Y, 100, 400);
+          lv_chart_set_axis_range(ch, LV_CHART_AXIS_SECONDARY_Y, 0, 1000);
+          // Keine Punktmarker — bei 288 Punkten auf 444 px wäre das eine Wand
+          lv_obj_set_style_width(ch, 0, LV_PART_INDICATOR);
+          lv_obj_set_style_height(ch, 0, LV_PART_INDICATOR);
+          lv_obj_set_style_line_width(ch, 2, LV_PART_ITEMS);
+          id(g_ser_t)    = lv_chart_add_series(ch, lv_color_hex(0x2E7D32), LV_CHART_AXIS_PRIMARY_Y);
+          id(g_ser_rh)   = lv_chart_add_series(ch, lv_color_hex(0x1565C0), LV_CHART_AXIS_SECONDARY_Y);
+          id(g_ser_spt)  = lv_chart_add_series(ch, lv_color_hex(0xD32F2F), LV_CHART_AXIS_PRIMARY_Y);
+          id(g_ser_sprh) = lv_chart_add_series(ch, lv_color_hex(0xD32F2F), LV_CHART_AXIS_SECONDARY_Y);
+          // Externe Arrays: LVGL zeichnet direkt aus unseren globals, es wird
+          // nichts kopiert. Deshalb müssen die Arrays int32_t sein.
+          lv_chart_set_series_ext_y_array(ch, id(g_ser_t),    id(g_c_t));
+          lv_chart_set_series_ext_y_array(ch, id(g_ser_rh),   id(g_c_rh));
+          lv_chart_set_series_ext_y_array(ch, id(g_ser_spt),  id(g_c_spt));
+          lv_chart_set_series_ext_y_array(ch, id(g_ser_sprh), id(g_c_sprh));
+          // Nur die Sollwertlinie der aktiven Größe zeigen
+          lv_chart_hide_series(ch, id(g_ser_sprh), true);
+          lv_chart_refresh(ch);
 
 esp32:
   variant: esp32s3
@@ -43,6 +92,65 @@ packages:
 api:
   encryption:
     key: !secret api_key_hmi
+  # Verlauf nach einem Neustart aus Home Assistant nachladen. REIN ADDITIV:
+  # Die Regelung hängt an keiner Stelle daran, und ohne HA baut sich die Kurve
+  # eben ab Start neu auf. Gefüllt werden nur Fenster, die noch leer sind —
+  # live gemessene Werte gewinnen immer gegen nachgeladene.
+  # Aufgerufen vom HA-Skript, das `recorder.get_statistics` mit period=5minute
+  # abfragt (siehe README). Zwei getrennte Aufrufe statt einem: je ~4,5 KB,
+  # klar unter MAX_MESSAGE_SIZE (32 KiB), und ein Fehlschlag reißt nicht beides
+  # mit. Die Arrays kommen ältester Wert zuerst.
+  actions:
+    - action: backfill_temp
+      variables:
+        age: int[]
+        mean: float[]
+        vmin: float[]
+        vmax: float[]
+      then:
+        - lambda: |-
+            size_t n = mean.size();
+            if (n == 0 || n > 288) return;
+            if (vmin.size() != n || vmax.size() != n || age.size() != n) return;
+            // `age` ist das Alter in 5-Minuten-Schritten (0 = laufendes
+            // Fenster). Der Recorder laesst Fenster ohne Daten WEG, die Zeilen
+            // sind also nicht lueckenlos — ohne den Zeitstempel wuerde sich
+            // die ganze Kurve verschieben.
+            for (size_t i = 0; i < n; i++) {
+              int a = age[i];
+              if (a < 0 || a >= 288) continue;
+              int slot = (id(g_c_head) - a + 576) % 288;
+              if (id(g_c_t)[slot] != LV_CHART_POINT_NONE) continue;
+              if (isnan(mean[i])) continue;
+              id(g_c_t)[slot] = (int32_t) lroundf(mean[i] * 10.0f);
+              id(g_x_tmin)[slot] = (int16_t) lroundf(vmin[i] * 10.0f);
+              id(g_x_tmax)[slot] = (int16_t) lroundf(vmax[i] * 10.0f);
+            }
+            if (id(g_chart) != nullptr) lv_chart_refresh(id(g_chart));
+            ESP_LOGI("hmi", "Backfill Temperatur: %u Fenster", (unsigned) n);
+    - action: backfill_hum
+      variables:
+        age: int[]
+        mean: float[]
+        vmin: float[]
+        vmax: float[]
+      then:
+        - lambda: |-
+            size_t n = mean.size();
+            if (n == 0 || n > 288) return;
+            if (vmin.size() != n || vmax.size() != n || age.size() != n) return;
+            for (size_t i = 0; i < n; i++) {
+              int a = age[i];
+              if (a < 0 || a >= 288) continue;
+              int slot = (id(g_c_head) - a + 576) % 288;
+              if (id(g_c_rh)[slot] != LV_CHART_POINT_NONE) continue;
+              if (isnan(mean[i])) continue;
+              id(g_c_rh)[slot] = (int32_t) lroundf(mean[i] * 10.0f);
+              id(g_x_rhmin)[slot] = (int16_t) lroundf(vmin[i] * 10.0f);
+              id(g_x_rhmax)[slot] = (int16_t) lroundf(vmax[i] * 10.0f);
+            }
+            if (id(g_chart) != nullptr) lv_chart_refresh(id(g_chart));
+            ESP_LOGI("hmi", "Backfill Feuchte: %u Fenster", (unsigned) n);
 
 # HA als zusätzliche Zeitquelle (SNTP kommt aus common.yaml)
 time:
@@ -201,34 +309,104 @@ globals:
     type: uint32_t
     restore_value: false
     initial_value: '0'
-  # false = Temperatur, true = Feuchte (Seite "Werte")
+  # false = Temperatur, true = Feuchte (Seite "Verlauf")
   - id: g_tf_mode
     type: bool
     restore_value: false
     initial_value: 'false'
-  # Tagesextreme. Bewusst NICHT persistiert: `restore_value` schriebe bei jedem
-  # neuen Extremwert in den Flash, und das passiert am Tagesanfang im
-  # Minutentakt. Nach einem Neustart beginnt die Messung eben neu.
-  - id: g_t_min
-    type: float
+
+  # ---- 24-h-Ringpuffer, 288 Fenster à 5 min ----------------------------------
+  # Werte als Zehntel (25,3 °C -> 253), damit LVGL sie ohne Umrechnung zeichnen
+  # kann: `lv_chart_set_ext_y_array` bindet diese Arrays direkt an die Serien,
+  # es wird also nichts kopiert. LV_CHART_POINT_NONE (INT32_MIN) markiert
+  # Fenster ohne Messwert — LVGL zeichnet dort schlicht nichts, die Linie reißt
+  # sichtbar ab. Bewusst nicht persistiert: 288 Punkte alle 5 min in den Flash
+  # zu schreiben wären ~105.000 Schreibzyklen im Jahr.
+  - id: g_c_t
+    type: int32_t[288]
     restore_value: false
-    initial_value: 'NAN'
-  - id: g_t_max
-    type: float
+  - id: g_c_rh
+    type: int32_t[288]
     restore_value: false
-    initial_value: 'NAN'
-  - id: g_rh_min
-    type: float
+  - id: g_c_spt
+    type: int32_t[288]
     restore_value: false
-    initial_value: 'NAN'
-  - id: g_rh_max
-    type: float
+  - id: g_c_sprh
+    type: int32_t[288]
     restore_value: false
-    initial_value: 'NAN'
-  - id: g_mm_yday
+  # Echte Fensterextreme. Die Kurve zeigt den Mittelwert (ruhig lesbar), die
+  # Min/Max-Zahlen kommen von hier — sonst würde eine 20-Sekunden-Spitze in der
+  # Mittelung verschwinden und in der Kennzahl fehlen.
+  - id: g_x_tmin
+    type: int16_t[288]
+    restore_value: false
+  - id: g_x_tmax
+    type: int16_t[288]
+    restore_value: false
+  - id: g_x_rhmin
+    type: int16_t[288]
+    restore_value: false
+  - id: g_x_rhmax
+    type: int16_t[288]
+    restore_value: false
+  - id: g_c_head        # nächster zu schreibender Index
     type: int
     restore_value: false
-    initial_value: '-1'
+    initial_value: '0'
+  - id: g_c_next_ms     # wann das laufende Fenster endet
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Akkumulatoren des laufenden Fensters
+  - id: g_a_n
+    type: uint16_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_a_tsum
+    type: float
+    restore_value: false
+    initial_value: '0'
+  - id: g_a_rhsum
+    type: float
+    restore_value: false
+    initial_value: '0'
+  - id: g_a_tmin
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_a_tmax
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_a_rhmin
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_a_rhmax
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  # Handles des per C-API aufgebauten Charts (ESPHome hat kein chart-Widget)
+  - id: g_chart
+    type: lv_obj_t*
+    restore_value: false
+    initial_value: 'nullptr'
+  - id: g_ser_t
+    type: lv_chart_series_t*
+    restore_value: false
+    initial_value: 'nullptr'
+  - id: g_ser_rh
+    type: lv_chart_series_t*
+    restore_value: false
+    initial_value: 'nullptr'
+  - id: g_ser_spt
+    type: lv_chart_series_t*
+    restore_value: false
+    initial_value: 'nullptr'
+  - id: g_ser_sprh
+    type: lv_chart_series_t*
+    restore_value: false
+    initial_value: 'nullptr'
 
 button:
   - platform: template
@@ -366,9 +544,9 @@ lvgl:
                 width: 112
                 height: 42
                 widgets:
-                  - label: { align: CENTER, text: "Werte", text_font: montserrat_14 }
+                  - label: { align: CENTER, text: "Verlauf", text_font: montserrat_14 }
                 on_click:
-                  - lvgl.page.show: page_values
+                  - lvgl.page.show: page_history
             - button:
                 id: nav_calib
                 align: TOP_LEFT
@@ -675,23 +853,28 @@ lvgl:
     # Wichtig bei der Feuchte: `sp_max_humidity` ist eine OBERGRENZE, kein
     # Zielwert. Ab ihr greift Priorität 6 (MAX_RH) und schaltet Abluft und
     # Entfeuchter ein. Deshalb steht dort "Max. Feuchte" und nicht "Soll".
-    - id: page_values
+    - id: page_history
       widgets:
         - label: { id: lbl_v_title, align: TOP_MID, y: 46, text: "Temperatur" }
-        - label: { id: lbl_v_cap, align: TOP_LEFT, x: 16, y: 80, text: "Ist-Wert Gewächshaus", text_font: montserrat_14 }
-        - label: { id: lbl_v_ist, align: TOP_MID, y: 100, text: "--", text_font: montserrat_40 }
-        - label: { id: lbl_v_max, align: TOP_LEFT, x: 16,  y: 158, text: "Höchst: --", text_font: montserrat_14 }
-        - label: { id: lbl_v_min, align: TOP_LEFT, x: 250, y: 158, text: "Niedrigst: --", text_font: montserrat_14 }
-        - label: { id: lbl_v_room, align: TOP_LEFT, x: 16, y: 184, text: "Raum: --", text_font: montserrat_14 }
-        - label: { id: lbl_v_health, align: TOP_LEFT, x: 16, y: 210, text: "Sensor: --", text_font: montserrat_14 }
-        - label: { id: lbl_v_spcap, align: TOP_LEFT, x: 16, y: 238, text: "Sollwert", text_font: montserrat_14 }
+        # Platzhalter, in den on_boot das Chart hineinbaut
+        - obj:
+            id: chart_holder
+            align: TOP_LEFT
+            x: 16
+            y: 74
+            width: 448
+            height: 140
+            border_width: 0
+            pad_all: 0
+        - label: { id: lbl_v_minmax, align: TOP_LEFT, x: 16, y: 218, text: "24 h: --", text_font: montserrat_14 }
+        - label: { id: lbl_v_ist, align: TOP_LEFT, x: 16, y: 240, text: "Ist --", text_font: montserrat_14 }
         - button:
             id: btn_v_dn
             align: TOP_LEFT
             x: 16
-            y: 258
+            y: 262
             width: 80
-            height: 60
+            height: 52
             widgets:
               - label: { align: CENTER, text: "-" }
             on_click:
@@ -705,14 +888,14 @@ lvgl:
                     if (v < 10.0f) v = 10.0f;
                     id(sp_target_temp).make_call().set_value(v).perform();
                   }
-        - label: { id: lbl_v_sp, align: TOP_MID, y: 272, text: "--", text_font: montserrat_28 }
+        - label: { id: lbl_v_sp, align: TOP_MID, y: 276, text: "--" }
         - button:
             id: btn_v_up
             align: TOP_LEFT
             x: 384
-            y: 258
+            y: 262
             width: 80
-            height: 60
+            height: 52
             widgets:
               - label: { align: CENTER, text: "+" }
             on_click:
@@ -726,30 +909,26 @@ lvgl:
                     if (v > 40.0f) v = 40.0f;
                     id(sp_target_temp).make_call().set_value(v).perform();
                   }
+        # Schaltet Kurvenzuordnung, Achsenbezug, rote Kennlinie und die Wirkung
+        # von -/+ gemeinsam um — es gibt keinen Zustand, in dem man das eine
+        # sieht und das andere verstellt.
         - button:
             id: btn_v_toggle
             align: TOP_LEFT
             x: 16
-            y: 326
-            width: 290
-            height: 48
+            y: 322
+            width: 448
+            height: 52
             widgets:
               - label: { id: lbl_v_toggle, align: CENTER, text: "Umschalten: Feuchte" }
             on_click:
-              - lambda: 'id(g_tf_mode) = !id(g_tf_mode);'
-        - button:
-            id: btn_v_reset
-            align: TOP_LEFT
-            x: 316
-            y: 326
-            width: 148
-            height: 48
-            widgets:
-              - label: { align: CENTER, text: "Min/Max", text_font: montserrat_14 }
-            on_click:
               - lambda: |-
-                  id(g_t_min) = NAN; id(g_t_max) = NAN;
-                  id(g_rh_min) = NAN; id(g_rh_max) = NAN;
+                  id(g_tf_mode) = !id(g_tf_mode);
+                  if (id(g_chart) != nullptr) {
+                    lv_chart_hide_series(id(g_chart), id(g_ser_spt),  id(g_tf_mode));
+                    lv_chart_hide_series(id(g_chart), id(g_ser_sprh), !id(g_tf_mode));
+                    lv_chart_refresh(id(g_chart));
+                  }
 
     # -------------------------------------------------------------- Kalibrierung
     # Invariante 7: Die LED darf nur bei gültiger Servo-Kalibrierung an. Ohne
@@ -919,14 +1098,18 @@ lvgl:
     - id: page_diag
       widgets:
         - label: { align: TOP_MID, y: 46, text: "Diagnose" }
-        - label: { id: lbl_d_rs485, align: TOP_LEFT, x: 16, y: 86,  text: "RS485: --" }
-        - label: { id: lbl_d_comm,  align: TOP_LEFT, x: 16, y: 116, text: "Comm: --" }
-        - label: { id: lbl_d_err,   align: TOP_LEFT, x: 16, y: 146, text: "Fehler: --" }
-        - label: { id: lbl_d_out,   align: TOP_LEFT, x: 16, y: 176, text: "Aktiv: --" }
-        - label: { id: lbl_d_age,   align: TOP_LEFT, x: 16, y: 206, text: "Sensoralter: -- s" }
-        - label: { id: lbl_d_heap,  align: TOP_LEFT, x: 16, y: 236, text: "Heap: -- B" }
-        - label: { id: lbl_d_rssi,  align: TOP_LEFT, x: 16, y: 266, text: "RSSI: -- dBm" }
-        - label: { id: lbl_d_up,    align: TOP_LEFT, x: 16, y: 296, text: "Uptime: -- s" }
+        - label: { id: lbl_d_rs485, align: TOP_LEFT, x: 16, y: 84,  text: "RS485: --", text_font: montserrat_14 }
+        - label: { id: lbl_d_comm,  align: TOP_LEFT, x: 16, y: 110, text: "Comm: --", text_font: montserrat_14 }
+        - label: { id: lbl_d_err,   align: TOP_LEFT, x: 16, y: 136, text: "Fehler: --", text_font: montserrat_14 }
+        - label: { id: lbl_d_out,   align: TOP_LEFT, x: 16, y: 162, text: "Aktiv: --", text_font: montserrat_14 }
+        # Von der früheren Sensorseite hierher gezogen, damit die Verlaufsseite
+        # Platz für die Kurve hat.
+        - label: { id: lbl_d_sens,  align: TOP_LEFT, x: 16, y: 188, text: "GH-Sensor: --", text_font: montserrat_14 }
+        - label: { id: lbl_d_room,  align: TOP_LEFT, x: 16, y: 214, text: "Raum: --", text_font: montserrat_14 }
+        - label: { id: lbl_d_age,   align: TOP_LEFT, x: 16, y: 240, text: "Sensoralter: -- s", text_font: montserrat_14 }
+        - label: { id: lbl_d_heap,  align: TOP_LEFT, x: 16, y: 266, text: "Heap: -- B", text_font: montserrat_14 }
+        - label: { id: lbl_d_rssi,  align: TOP_LEFT, x: 16, y: 292, text: "WLAN: -- dBm", text_font: montserrat_14 }
+        - label: { id: lbl_d_up,    align: TOP_LEFT, x: 16, y: 318, text: "Uptime: -- s", text_font: montserrat_14 }
         - button:
             id: btn_rs485_resync
             align: TOP_LEFT
@@ -1019,7 +1202,7 @@ interval:
           lv_label_set_text(id(lbl_d_age), buf);
           snprintf(buf, sizeof(buf), "Heap: %.0f B", id(diag_free_heap).state);
           lv_label_set_text(id(lbl_d_heap), buf);
-          snprintf(buf, sizeof(buf), "RSSI: %.0f dBm", id(diag_wifi_rssi).state);
+          snprintf(buf, sizeof(buf), "WLAN: %.0f dBm", id(diag_wifi_rssi).state);
           lv_label_set_text(id(lbl_d_rssi), buf);
           snprintf(buf, sizeof(buf), "Uptime: %.0f s", id(diag_uptime).state);
           lv_label_set_text(id(lbl_d_up), buf);
@@ -1041,66 +1224,120 @@ interval:
           snprintf(buf, sizeof(buf), "Laufzeit: %.0f s", id(irrig_valve_time).state);
           lv_label_set_text(id(lbl_i_time), buf);
 
-          // --- Seite "Werte": Tagesextreme fortschreiben ---
-          // Reset beim Tageswechsel über day_of_year statt über einen zweiten
-          // on_time-Trigger: packages/irrigation.yaml erweitert `sntp_time`
-          // bereits per !extend, ein zweites !extend derselben ID wäre fragil.
-          {
-            auto tnow = id(sntp_time).now();
-            int yday = tnow.is_valid() ? tnow.day_of_year : -1;
-            if (yday > 0 && yday != id(g_mm_yday)) {
-              id(g_mm_yday) = yday;
-              id(g_t_min) = NAN; id(g_t_max) = NAN;
-              id(g_rh_min) = NAN; id(g_rh_max) = NAN;
-            }
-          }
+          // --- Seite "Verlauf": 5-Minuten-Fenster aggregieren -----------------
           float vt = id(gh_temp).state, vr = id(gh_rh).state;
-          if (!isnan(vt)) {
-            if (isnan(id(g_t_min)) || vt < id(g_t_min)) id(g_t_min) = vt;
-            if (isnan(id(g_t_max)) || vt > id(g_t_max)) id(g_t_max) = vt;
-          }
-          if (!isnan(vr)) {
-            if (isnan(id(g_rh_min)) || vr < id(g_rh_min)) id(g_rh_min) = vr;
-            if (isnan(id(g_rh_max)) || vr > id(g_rh_max)) id(g_rh_max) = vr;
+          if (!isnan(vt) && !isnan(vr)) {
+            id(g_a_n) = id(g_a_n) + 1;
+            id(g_a_tsum) = id(g_a_tsum) + vt;
+            id(g_a_rhsum) = id(g_a_rhsum) + vr;
+            if (isnan(id(g_a_tmin)) || vt < id(g_a_tmin)) id(g_a_tmin) = vt;
+            if (isnan(id(g_a_tmax)) || vt > id(g_a_tmax)) id(g_a_tmax) = vt;
+            if (isnan(id(g_a_rhmin)) || vr < id(g_a_rhmin)) id(g_a_rhmin) = vr;
+            if (isnan(id(g_a_rhmax)) || vr > id(g_a_rhmax)) id(g_a_rhmax) = vr;
           }
 
+          uint32_t nowms = millis();
+          if (id(g_c_next_ms) == 0) id(g_c_next_ms) = nowms + 300000;
+          if ((int32_t)(nowms - id(g_c_next_ms)) >= 0) {
+            id(g_c_next_ms) = nowms + 300000;
+            int h = id(g_c_head);
+            if (id(g_a_n) > 0) {
+              // Kurve zeigt den Mittelwert, die Kennzahlen die echten Extreme
+              id(g_c_t)[h]  = (int32_t) lroundf(id(g_a_tsum) / id(g_a_n) * 10.0f);
+              id(g_c_rh)[h] = (int32_t) lroundf(id(g_a_rhsum) / id(g_a_n) * 10.0f);
+              id(g_x_tmin)[h]  = (int16_t) lroundf(id(g_a_tmin) * 10.0f);
+              id(g_x_tmax)[h]  = (int16_t) lroundf(id(g_a_tmax) * 10.0f);
+              id(g_x_rhmin)[h] = (int16_t) lroundf(id(g_a_rhmin) * 10.0f);
+              id(g_x_rhmax)[h] = (int16_t) lroundf(id(g_a_rhmax) * 10.0f);
+              // Sollwerte zum Zeitpunkt der Messung — nur so stimmt der
+              // Vergleich "drüber/drunter" auch nach einer Verstellung
+              id(g_c_spt)[h]  = (int32_t) lroundf(id(sp_target_temp).state * 10.0f);
+              id(g_c_sprh)[h] = (int32_t) lroundf(id(sp_max_humidity).state * 10.0f);
+            } else {
+              // Kein einziges Paket in diesen 5 Minuten -> Lücke, keine Erfindung
+              id(g_c_t)[h] = LV_CHART_POINT_NONE;
+              id(g_c_rh)[h] = LV_CHART_POINT_NONE;
+              id(g_c_spt)[h] = LV_CHART_POINT_NONE;
+              id(g_c_sprh)[h] = LV_CHART_POINT_NONE;
+              id(g_x_tmin)[h] = INT16_MIN;
+              id(g_x_tmax)[h] = INT16_MIN;
+              id(g_x_rhmin)[h] = INT16_MIN;
+              id(g_x_rhmax)[h] = INT16_MIN;
+            }
+            id(g_a_n) = 0; id(g_a_tsum) = 0; id(g_a_rhsum) = 0;
+            id(g_a_tmin) = NAN; id(g_a_tmax) = NAN;
+            id(g_a_rhmin) = NAN; id(g_a_rhmax) = NAN;
+            id(g_c_head) = (h + 1) % 288;
+            if (id(g_chart) != nullptr) {
+              // Der Ring gilt IMMER als voll: 288 Fenster = die letzten 24 h,
+              // unbekannte davon als Lücke. Nur so ist die Zeitachse stabil
+              // (linker Rand = vor 24 h) und der Backfill kann Fenster füllen,
+              // die zeitlich VOR dem Start liegen. Ältester Punkt steht am
+              // Ringkopf, dort beginnt LVGL zu zeichnen.
+              uint32_t start = (uint32_t) id(g_c_head);
+              lv_chart_set_x_start_point(id(g_chart), id(g_ser_t), start);
+              lv_chart_set_x_start_point(id(g_chart), id(g_ser_rh), start);
+              lv_chart_set_x_start_point(id(g_chart), id(g_ser_spt), start);
+              lv_chart_set_x_start_point(id(g_chart), id(g_ser_sprh), start);
+              lv_chart_refresh(id(g_chart));
+            }
+          }
+
+          // --- Seite "Verlauf": Beschriftung ---------------------------------
           bool feu = id(g_tf_mode);
           lv_label_set_text(id(lbl_v_title), feu ? "Luftfeuchte" : "Temperatur");
           lv_label_set_text(id(lbl_v_toggle), feu ? "Umschalten: Temperatur" : "Umschalten: Feuchte");
 
-          float ist   = feu ? vr : vt;
-          float vmin  = feu ? id(g_rh_min) : id(g_t_min);
-          float vmax  = feu ? id(g_rh_max) : id(g_t_max);
+          // Rollende Extreme aus demselben Puffer, der die Kurve speist —
+          // eine Datenquelle, keine widersprüchlichen Zahlen. Nebenbei zählen
+          // wir, wie viele Fenster überhaupt belegt sind, um die Spanne
+          // ehrlich zu beschriften.
+          int16_t emin = INT16_MAX, emax = INT16_MIN;
+          int valid = 0;
+          for (int i = 0; i < 288; i++) {
+            int16_t lo = feu ? id(g_x_rhmin)[i] : id(g_x_tmin)[i];
+            int16_t hi = feu ? id(g_x_rhmax)[i] : id(g_x_tmax)[i];
+            if (lo == INT16_MIN) continue;
+            valid++;
+            if (lo < emin) emin = lo;
+            if (hi > emax) emax = hi;
+          }
           const char *unit = feu ? "%" : "°C";
           int dec = feu ? 0 : 1;
-
-          if (isnan(ist)) lv_label_set_text(id(lbl_v_ist), "--");
-          else { snprintf(buf, sizeof(buf), "%.*f %s", dec, ist, unit);
-                 lv_label_set_text(id(lbl_v_ist), buf); }
-          if (isnan(vmax)) lv_label_set_text(id(lbl_v_max), "Höchst: --");
-          else { snprintf(buf, sizeof(buf), "Höchst: %.*f %s", dec, vmax, unit);
-                 lv_label_set_text(id(lbl_v_max), buf); }
-          if (isnan(vmin)) lv_label_set_text(id(lbl_v_min), "Niedrigst: --");
-          else { snprintf(buf, sizeof(buf), "Niedrigst: %.*f %s", dec, vmin, unit);
-                 lv_label_set_text(id(lbl_v_min), buf); }
-
-          if (feu) {
-            snprintf(buf, sizeof(buf), "Max. Feuchte: %.0f %%", id(sp_max_humidity).state);
+          if (valid == 0) {
+            lv_label_set_text(id(lbl_v_minmax), "noch keine Messwerte");
           } else {
-            snprintf(buf, sizeof(buf), "Ziel: %.1f °C", id(sp_target_temp).state);
+            char span[24];
+            if (valid >= 288) {
+              snprintf(span, sizeof(span), "24 h");
+            } else {
+              // Ehrlich beschriften statt "24 h" zu behaupten
+              int mins = valid * 5;
+              snprintf(span, sizeof(span), "%d h %02d min", mins / 60, mins % 60);
+            }
+            snprintf(buf, sizeof(buf), "%s: %.*f … %.*f %s",
+                     span, dec, emin / 10.0f, dec, emax / 10.0f, unit);
+            lv_label_set_text(id(lbl_v_minmax), buf);
           }
-          lv_label_set_text(id(lbl_v_sp), buf);
-          lv_label_set_text(id(lbl_v_spcap), feu ? "Obergrenze (löst Entfeuchten aus)" : "Zieltemperatur");
 
-          if (isnan(id(room_temp).state)) lv_label_set_text(id(lbl_v_room), "Raum: kein Empfang");
+          float ist = feu ? vr : vt;
+          if (isnan(ist)) lv_label_set_text(id(lbl_v_ist), "Ist --");
+          else { snprintf(buf, sizeof(buf), "Ist %.*f %s", dec, ist, unit);
+                 lv_label_set_text(id(lbl_v_ist), buf); }
+
+          if (feu) snprintf(buf, sizeof(buf), "Max. Feuchte %.0f %%", id(sp_max_humidity).state);
+          else     snprintf(buf, sizeof(buf), "Ziel %.1f °C", id(sp_target_temp).state);
+          lv_label_set_text(id(lbl_v_sp), buf);
+
+          // --- Sensorzeilen (jetzt auf der Diagnose-Seite) --------------------
+          if (isnan(id(gh_age).state)) lv_label_set_text(id(lbl_d_sens), "GH-Sensor: noch kein Paket");
+          else { snprintf(buf, sizeof(buf), "GH-Sensor: Batt %.0f %% · %.0f dBm",
+                          id(gh_batt).state, id(gh_rssi).state);
+                 lv_label_set_text(id(lbl_d_sens), buf); }
+          if (isnan(id(room_temp).state)) lv_label_set_text(id(lbl_d_room), "Raum: kein Empfang");
           else { snprintf(buf, sizeof(buf), "Raum: %.1f °C · %.0f %%",
                           id(room_temp).state, id(room_rh).state);
-                 lv_label_set_text(id(lbl_v_room), buf); }
-
-          if (isnan(id(gh_age).state)) lv_label_set_text(id(lbl_v_health), "Sensor: noch kein Paket");
-          else { snprintf(buf, sizeof(buf), "Batt %.0f %% · %.0f dBm · vor %.0f s",
-                          id(gh_batt).state, id(gh_rssi).state, id(gh_age).state);
-                 lv_label_set_text(id(lbl_v_health), buf); }
+                 lv_label_set_text(id(lbl_d_room), buf); }
 
           // --- Kalibrierung ---
           lv_label_set_text(id(lbl_k_state), id(g_servo_cal_valid) ? "Servo-Kalibrierung: gültig"
@@ -1108,7 +1345,6 @@ interval:
           lv_label_set_text(id(lbl_k_light), id(g_light_on) ? "Licht freigegeben: ja"
                                                             : "Licht freigegeben: nein");
           // Scharfschaltung läuft nach 10 s von selbst wieder ab
-          uint32_t nowms = millis();
           if (id(g_cal_arm_ms) != 0 && nowms >= id(g_cal_arm_ms)) id(g_cal_arm_ms) = 0;
           if (id(g_cal_arm_ms) != 0) {
             snprintf(buf, sizeof(buf), "Wirklich freigeben? (%u s)",
