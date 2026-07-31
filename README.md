@@ -102,6 +102,51 @@ esphome run  nodes/kc868-a16.yaml     --device kc868-a16.local
 Home Assistant findet die Knoten ohnehin per zeroconf; beide sind auf dem
 Dev-Server (10.10.10.205) eingebunden.
 
+## Verlaufsdiagramm auf dem Panel
+
+Die Seite „Verlauf" zeigt Temperatur und Feuchte über 24 h als Kurven, dazu eine
+rote Kennlinie mit dem **damals** eingestellten Sollwert und die Extremwerte
+dieser 24 h. Ein Knopf schaltet zwischen beiden Größen um und wechselt dabei
+Kurvenbezug, rote Kennlinie und die Wirkung der −/+-Tasten gemeinsam.
+
+**LVGL-Chart ist in ESPHome nicht vorgesehen.** Es gibt kein `chart`-Widget, und
+die generierte `lv_conf.h` setzt `LV_USE_CHART` auf 0. Freigeschaltet wird es
+über `esphome: platformio_options: build_flags: ["-DLV_USE_CHART=1"]` —
+`lvgl/__init__.py` durchsucht die Build-Flags nach `-DLV_USE_*` und lässt so
+markierte Defines stehen. Aufgebaut wird das Chart in `on_boot` über die
+LVGL-C-API. **Wird das Flag entfernt, bricht der Build mit undefinierten
+`lv_chart_*`-Symbolen ab.**
+
+Datenhaltung: 288 Fenster à 5 min als `int32_t`-Ringpuffer in Zehnteln, per
+`lv_chart_set_series_ext_y_array` direkt an die Serien gebunden. Die Kurve zeigt
+den Fenstermittelwert; die Min/Max-Zahlen kommen aus separat mitgeführten echten
+Fensterextremen, damit eine kurze Spitze nicht in der Mittelung verschwindet.
+Fenster ohne Messwert bleiben `LV_CHART_POINT_NONE` — die Linie reißt sichtbar
+ab, statt einen Sensorausfall als stabile Phase auszugeben. Der Puffer liegt im
+RAM und wird bewusst **nicht** persistiert (288 Fenster alle 5 min in den Flash
+wären ~105.000 Schreibzyklen im Jahr).
+
+### Backfill aus Home Assistant (optional, rein additiv)
+
+Nach einem Neustart ist der Puffer leer. Auf der **Dev**-HA füllen ihn
+`script.greenhouse_hmi_verlauf_nachladen` und die Automation
+„Gewächshaus HMI: Verlauf nach Neustart nachladen" über `recorder.get_statistics`
+(`period: 5minute`, `types: [mean, min, max]`) und die beiden ESPHome-Actions
+`backfill_temp` / `backfill_hum`.
+
+**Die Grundregelung hängt an keiner Stelle daran.** Fehlt HA, baut sich die Kurve
+einfach ab Start neu auf. Zwei Fallen sind dort fest verdrahtet:
+
+- `units: {temperature: "°C"}` ist **Pflicht** — HA führt den Gewächshaus-Sensor
+  in Fahrenheit (84,7 °F bei 29,3 °C am Gerät) und lieferte sonst 84er-Werte.
+- Der Recorder lässt Fenster ohne Daten **weg**. Die Zeilen sind also nicht
+  lückenlos; jede bringt deshalb ihr Alter in 5-Minuten-Schritten mit, sonst
+  verschöbe sich die ganze Kurve.
+
+Die rote Kennlinie lässt sich nicht nachladen: `number`-Entitäten haben kein
+`state_class`, HA führt für sie keine Statistik. Sie beginnt daher am
+Startzeitpunkt des Panels.
+
 ## Flash-Reihenfolge (Erstinbetriebnahme)
 
 1. `kc868-a16` zuerst (USB, S2-Taster + 12 V, Flash — siehe doku/KC868-Manual).
