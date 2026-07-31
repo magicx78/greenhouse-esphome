@@ -194,6 +194,14 @@ binary_sensor:
       std::string m = id(sp_mode).current_option().str();
       return m == "AUTO_TEMPERATURE" || m == "AUTO_VPD";
 
+# Nur UI-Zustand, bewusst nicht persistent: Nach einem Neustart ist die
+# Freigabe der Servo-Kalibrierung wieder unscharf, nicht halb erteilt.
+globals:
+  - id: g_cal_arm_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
 button:
   - platform: template
     name: "Not-Aus"
@@ -212,15 +220,22 @@ button:
 # ============================ LVGL UI ============================
 # 480x480, GT911. Aufteilung — dieselbe auf JEDER Seite:
 #   y   0.. 40  Alarmleiste (top_layer, nur bei Alarm sichtbar)
-#   y  46..404  Seiteninhalt (Titel bei y=46, Zeilen ab y=86 im Raster von 34)
-#   y 408..480  Navigationsleiste (top_layer, immer sichtbar)
+#   y  46..380  Seiteninhalt (Titel bei y=46, Zeilen ab y=86)
+#   y 384..480  Navigationsleiste (top_layer, immer sichtbar, 8 Ziele)
 # Der Inhalt beginnt bewusst unter der Alarmleiste: Ein Alarm darf Messwerte
-# überlagern, aber die Seitenüberschrift soll nicht verschwinden.
+# überlagern, aber die Seitenüberschrift soll nicht verschwinden. Nichts auf
+# einer Seite darf über y=380 hinausragen, sonst verdeckt es die Navigation.
 #
 # Neue Seiten nach diesem Muster: Seite unter `pages:` anlegen, Labels ohne
 # Werte vorbelegen ("--"), im 1s-Interval unten befüllen, Navigationsknopf
-# ergänzen. Es fehlen noch: Bewässerung, Gewicht, Sensoren, Kalibrierung,
-# Einstellungen.
+# ergänzen. Ab neun Seiten reicht die zweireihige Leiste nicht mehr — dann
+# braucht es eine Menüseite statt weiterer Knöpfe.
+#
+# Eine Seite "Gewicht" fehlt bewusst: Die HX711-Waage lebt in
+# packages/weight.yaml auf greenhouse-io, ist auf diesem Knoten nicht
+# eingebunden und hätte hier keine Datenquelle. Dasselbe gilt für echte
+# Lüfter-Drehzahlen (packages/fans.yaml) — die Seite Licht/Luft zeigt deshalb
+# nur den Sollwert, den dieser Knoten selbst berechnet.
 lvgl:
   displays:
     - main_display
@@ -252,52 +267,102 @@ lvgl:
                 align: CENTER
                 text: "ALARM"
                 text_color: 0xFFFFFF
-      # Navigationsleiste (auf jeder Seite sichtbar)
+      # Navigationsleiste (auf jeder Seite sichtbar), zwei Reihen à vier Ziele.
+      # 112x42 je Knopf — auf einem 480er-Panel rund 12x5 mm, also noch sicher
+      # mit dem Finger zu treffen.
       - obj:
           id: nav_bar
           align: BOTTOM_MID
           width: 480
-          height: 72
+          height: 96
           bg_color: 0x202020
           border_width: 0
           pad_all: 0
           widgets:
             - button:
                 id: nav_overview
-                align: LEFT_MID
+                align: TOP_LEFT
                 x: 4
+                y: 4
                 width: 112
-                height: 60
+                height: 42
                 widgets:
                   - label: { align: CENTER, text: "Übersicht", text_font: montserrat_14 }
                 on_click:
                   - lvgl.page.show: page_overview
             - button:
                 id: nav_climate
-                align: LEFT_MID
+                align: TOP_LEFT
                 x: 122
+                y: 4
                 width: 112
-                height: 60
+                height: 42
                 widgets:
                   - label: { align: CENTER, text: "Klima", text_font: montserrat_14 }
                 on_click:
                   - lvgl.page.show: page_climate
             - button:
                 id: nav_lightfan
-                align: LEFT_MID
+                align: TOP_LEFT
                 x: 240
+                y: 4
                 width: 112
-                height: 60
+                height: 42
                 widgets:
                   - label: { align: CENTER, text: "Licht/Luft", text_font: montserrat_14 }
                 on_click:
                   - lvgl.page.show: page_lightfan
             - button:
-                id: nav_diag
-                align: LEFT_MID
+                id: nav_irrigation
+                align: TOP_LEFT
                 x: 358
+                y: 4
                 width: 112
-                height: 60
+                height: 42
+                widgets:
+                  - label: { align: CENTER, text: "Wasser", text_font: montserrat_14 }
+                on_click:
+                  - lvgl.page.show: page_irrigation
+            - button:
+                id: nav_sensors
+                align: TOP_LEFT
+                x: 4
+                y: 50
+                width: 112
+                height: 42
+                widgets:
+                  - label: { align: CENTER, text: "Sensoren", text_font: montserrat_14 }
+                on_click:
+                  - lvgl.page.show: page_sensors
+            - button:
+                id: nav_calib
+                align: TOP_LEFT
+                x: 122
+                y: 50
+                width: 112
+                height: 42
+                widgets:
+                  - label: { align: CENTER, text: "Kalibr.", text_font: montserrat_14 }
+                on_click:
+                  - lvgl.page.show: page_calib
+            - button:
+                id: nav_settings
+                align: TOP_LEFT
+                x: 240
+                y: 50
+                width: 112
+                height: 42
+                widgets:
+                  - label: { align: CENTER, text: "Einstell.", text_font: montserrat_14 }
+                on_click:
+                  - lvgl.page.show: page_settings
+            - button:
+                id: nav_diag
+                align: TOP_LEFT
+                x: 358
+                y: 50
+                width: 112
+                height: 42
                 widgets:
                   - label: { align: CENTER, text: "Diagnose", text_font: montserrat_14 }
                 on_click:
@@ -317,9 +382,9 @@ lvgl:
             id: btn_mode_auto
             align: TOP_LEFT
             x: 16
-            y: 306
+            y: 300
             width: 216
-            height: 72
+            height: 68
             widgets:
               - label: { align: CENTER, text: "AUTO_VPD" }
             on_click:
@@ -328,9 +393,9 @@ lvgl:
             id: btn_emergency
             align: TOP_LEFT
             x: 248
-            y: 306
+            y: 300
             width: 216
-            height: 72
+            height: 68
             bg_color: 0xB00020
             widgets:
               - label: { align: CENTER, text: "NOT-AUS", text_color: 0xFFFFFF }
@@ -347,14 +412,14 @@ lvgl:
         - label: { id: lbl_c_vpda,  align: TOP_LEFT, x: 16, y: 188, text: "VPD Luft: -- kPa" }
         - label: { id: lbl_c_vpdl,  align: TOP_LEFT, x: 16, y: 222, text: "VPD Blatt: -- kPa" }
         # Ziel-VPD (Schritt 0.05 kPa, Grenzen wie die number-Entität)
-        - label: { id: lbl_c_spvpd, align: TOP_LEFT, x: 16, y: 262, text: "Ziel-VPD: -- kPa" }
+        - label: { id: lbl_c_spvpd, align: TOP_LEFT, x: 16, y: 258, text: "Ziel-VPD: -- kPa" }
         - button:
             id: btn_vpd_dn
             align: TOP_LEFT
             x: 316
-            y: 254
+            y: 246
             width: 68
-            height: 56
+            height: 48
             widgets:
               - label: { align: CENTER, text: "-" }
             on_click:
@@ -366,9 +431,9 @@ lvgl:
             id: btn_vpd_up
             align: TOP_LEFT
             x: 392
-            y: 254
+            y: 246
             width: 68
-            height: 56
+            height: 48
             widgets:
               - label: { align: CENTER, text: "+" }
             on_click:
@@ -377,14 +442,14 @@ lvgl:
                   if (v > 2.0f) v = 2.0f;
                   id(sp_target_vpd).make_call().set_value(v).perform();
         # Zieltemperatur (Schritt 0.5 K)
-        - label: { id: lbl_c_sptemp, align: TOP_LEFT, x: 16, y: 330, text: "Ziel-T: -- °C" }
+        - label: { id: lbl_c_sptemp, align: TOP_LEFT, x: 16, y: 322, text: "Ziel-T: -- °C" }
         - button:
             id: btn_temp_dn
             align: TOP_LEFT
             x: 316
-            y: 322
+            y: 310
             width: 68
-            height: 56
+            height: 48
             widgets:
               - label: { align: CENTER, text: "-" }
             on_click:
@@ -396,9 +461,9 @@ lvgl:
             id: btn_temp_up
             align: TOP_LEFT
             x: 392
-            y: 322
+            y: 310
             width: 68
-            height: 56
+            height: 48
             widgets:
               - label: { align: CENTER, text: "+" }
             on_click:
@@ -417,14 +482,14 @@ lvgl:
         - label: { id: lbl_l_cal,   align: TOP_LEFT, x: 16, y: 120, text: "Servo-Kal.: --" }
         - label: { id: lbl_l_sched, align: TOP_LEFT, x: 16, y: 154, text: "Tag: --" }
         - label: { id: lbl_l_fan,   align: TOP_LEFT, x: 16, y: 188, text: "Umluft: -- %" }
-        - label: { id: lbl_l_bright, align: TOP_LEFT, x: 16, y: 236, text: "Helligkeit: -- %" }
+        - label: { id: lbl_l_bright, align: TOP_LEFT, x: 16, y: 234, text: "Helligkeit: -- %" }
         - button:
             id: btn_bright_dn
             align: TOP_LEFT
             x: 316
-            y: 228
+            y: 222
             width: 68
-            height: 56
+            height: 48
             widgets:
               - label: { align: CENTER, text: "-" }
             on_click:
@@ -436,9 +501,9 @@ lvgl:
             id: btn_bright_up
             align: TOP_LEFT
             x: 392
-            y: 228
+            y: 222
             width: 68
-            height: 56
+            height: 48
             widgets:
               - label: { align: CENTER, text: "+" }
             on_click:
@@ -450,9 +515,9 @@ lvgl:
             id: btn_light_toggle
             align: TOP_LEFT
             x: 16
-            y: 306
+            y: 300
             width: 216
-            height: 72
+            height: 68
             widgets:
               - label: { align: CENTER, text: "Licht manuell" }
             on_click:
@@ -461,15 +526,291 @@ lvgl:
             id: btn_light_off
             align: TOP_LEFT
             x: 248
-            y: 306
+            y: 300
             width: 216
-            height: 72
+            height: 68
             widgets:
               - label: { align: CENTER, text: "Licht AUS" }
             on_click:
               - lambda: |-
                   id(g_light_on) = false;
                   id(light_manual).turn_off();
+
+    # -------------------------------------------------------------- Bewässerung
+    # Bedient den Zonen-Sequencer aus packages/irrigation.yaml. Die Interlocks
+    # (Pumpe nur mit offenem Ventil, max. Ventilzahl, Ventil-Laufzeit) erzwingt
+    # zusätzlich der KC868 in packages/safety.yaml — diese Seite kann sie nicht
+    # umgehen, sie stellt nur Zone und Laufzeit ein.
+    - id: page_irrigation
+      widgets:
+        - label: { align: TOP_MID, y: 46, text: "Bewässerung" }
+        - label: { id: lbl_i_state,  align: TOP_LEFT, x: 16, y: 86,  text: "Status: --" }
+        - label: { id: lbl_i_valves, align: TOP_LEFT, x: 16, y: 118, text: "Offen: --" }
+        - label: { id: lbl_i_daily,  align: TOP_LEFT, x: 16, y: 150, text: "Heute: -- s" }
+        # Zone 0 = keine; run_zone ignoriert alles außerhalb 1..8
+        - label: { id: lbl_i_zone, align: TOP_LEFT, x: 16, y: 194, text: "Zone: --" }
+        - button:
+            id: btn_zone_dn
+            align: TOP_LEFT
+            x: 316
+            y: 182
+            width: 68
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "-" }
+            on_click:
+              - lambda: |-
+                  float v = id(irrig_zone).state - 1.0f;
+                  if (v < 0.0f) v = 0.0f;
+                  id(irrig_zone).make_call().set_value(v).perform();
+        - button:
+            id: btn_zone_up
+            align: TOP_LEFT
+            x: 392
+            y: 182
+            width: 68
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "+" }
+            on_click:
+              - lambda: |-
+                  float v = id(irrig_zone).state + 1.0f;
+                  if (v > 8.0f) v = 8.0f;
+                  id(irrig_zone).make_call().set_value(v).perform();
+        - label: { id: lbl_i_time, align: TOP_LEFT, x: 16, y: 258, text: "Laufzeit: -- s" }
+        - button:
+            id: btn_itime_dn
+            align: TOP_LEFT
+            x: 316
+            y: 246
+            width: 68
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "-" }
+            on_click:
+              - lambda: |-
+                  float v = id(irrig_valve_time).state - 5.0f;
+                  if (v < 1.0f) v = 1.0f;
+                  id(irrig_valve_time).make_call().set_value(v).perform();
+        - button:
+            id: btn_itime_up
+            align: TOP_LEFT
+            x: 392
+            y: 246
+            width: 68
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "+" }
+            on_click:
+              - lambda: |-
+                  float v = id(irrig_valve_time).state + 5.0f;
+                  if (v > ${valve_max_time_s}) v = ${valve_max_time_s};
+                  id(irrig_valve_time).make_call().set_value(v).perform();
+        - button:
+            id: btn_irrig_start
+            align: TOP_LEFT
+            x: 16
+            y: 310
+            width: 216
+            height: 60
+            widgets:
+              - label: { align: CENTER, text: "Zone starten" }
+            on_click:
+              - script.execute:
+                  id: run_zone
+                  zone: !lambda 'return (int) id(irrig_zone).state;'
+        - button:
+            id: btn_irrig_stop
+            align: TOP_LEFT
+            x: 248
+            y: 310
+            width: 216
+            height: 60
+            bg_color: 0xB00020
+            widgets:
+              - label: { align: CENTER, text: "STOPP", text_color: 0xFFFFFF }
+            on_click:
+              - script.execute: stop_irrigation
+
+    # ----------------------------------------------------------------- Sensoren
+    # Dichte Tabelle -> hier bewusst montserrat_14 statt des Theme-Fonts.
+    - id: page_sensors
+      widgets:
+        - label: { align: TOP_MID, y: 46, text: "Sensoren" }
+        - label: { id: lbl_s_gh_hdr,  align: TOP_LEFT, x: 16, y: 84,  text: "Gewächshaus", text_font: montserrat_14 }
+        - label: { id: lbl_s_gh_t,    align: TOP_LEFT, x: 32, y: 112, text: "Temperatur: --", text_font: montserrat_14 }
+        - label: { id: lbl_s_gh_rh,   align: TOP_LEFT, x: 32, y: 140, text: "Luftfeuchte: --", text_font: montserrat_14 }
+        - label: { id: lbl_s_gh_batt, align: TOP_LEFT, x: 32, y: 168, text: "Batterie: --", text_font: montserrat_14 }
+        - label: { id: lbl_s_gh_rssi, align: TOP_LEFT, x: 32, y: 196, text: "RSSI: --", text_font: montserrat_14 }
+        - label: { id: lbl_s_gh_age,  align: TOP_LEFT, x: 32, y: 224, text: "Letztes Paket: --", text_font: montserrat_14 }
+        - label: { id: lbl_s_rm_hdr,  align: TOP_LEFT, x: 16, y: 258, text: "Raum (Referenz)", text_font: montserrat_14 }
+        - label: { id: lbl_s_rm_t,    align: TOP_LEFT, x: 32, y: 286, text: "Temperatur: --", text_font: montserrat_14 }
+        - label: { id: lbl_s_rm_rh,   align: TOP_LEFT, x: 32, y: 314, text: "Luftfeuchte: --", text_font: montserrat_14 }
+        - label: { id: lbl_s_rm_batt, align: TOP_LEFT, x: 32, y: 342, text: "Batterie: --", text_font: montserrat_14 }
+
+    # -------------------------------------------------------------- Kalibrierung
+    # Invariante 7: Die LED darf nur bei gültiger Servo-Kalibrierung an. Ohne
+    # diese Seite konnte `g_servo_cal_valid` nirgends gesetzt werden — das Gate
+    # war damit dauerhaft zu und Zeitplan wie Handschalter liefen ins Leere.
+    # Freigabe deshalb absichtlich zweistufig: erster Druck schärft für 10 s,
+    # zweiter gibt frei. Verwerfen geht jederzeit mit einem Druck.
+    - id: page_calib
+      widgets:
+        - label: { align: TOP_MID, y: 46, text: "Kalibrierung" }
+        - label: { id: lbl_k_state, align: TOP_LEFT, x: 16, y: 90,  text: "Servo-Kalibrierung: --" }
+        - label: { id: lbl_k_h1, align: TOP_LEFT, x: 16, y: 132, text: "Servo am Dimmer justieren,", text_font: montserrat_14 }
+        - label: { id: lbl_k_h2, align: TOP_LEFT, x: 16, y: 158, text: "Endanschläge prüfen, dann hier", text_font: montserrat_14 }
+        - label: { id: lbl_k_h3, align: TOP_LEFT, x: 16, y: 184, text: "freigeben. Erst dann geht die LED.", text_font: montserrat_14 }
+        - label: { id: lbl_k_light, align: TOP_LEFT, x: 16, y: 220, text: "Licht freigegeben: --" }
+        - button:
+            id: btn_cal_arm
+            align: TOP_LEFT
+            x: 16
+            y: 266
+            width: 448
+            height: 52
+            widgets:
+              - label: { id: lbl_k_arm, align: CENTER, text: "Kalibrierung freigeben" }
+            on_click:
+              - lambda: |-
+                  uint32_t now = millis();
+                  if (id(g_cal_arm_ms) != 0 && now < id(g_cal_arm_ms)) {
+                    id(g_servo_cal_valid) = true;
+                    id(g_cal_arm_ms) = 0;
+                    ESP_LOGI("hmi", "Servo-Kalibrierung freigegeben (zweistufig bestaetigt)");
+                  } else {
+                    id(g_cal_arm_ms) = now + 10000;
+                  }
+        - button:
+            id: btn_cal_clear
+            align: TOP_LEFT
+            x: 16
+            y: 326
+            width: 448
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "Kalibrierung verwerfen" }
+            on_click:
+              - lambda: |-
+                  id(g_servo_cal_valid) = false;
+                  id(g_cal_arm_ms) = 0;
+                  ESP_LOGW("hmi", "Servo-Kalibrierung verworfen - LED gesperrt");
+
+    # ------------------------------------------------------------- Einstellungen
+    - id: page_settings
+      widgets:
+        - label: { align: TOP_MID, y: 46, text: "Einstellungen" }
+        - label: { id: lbl_e_mode, align: TOP_LEFT, x: 16, y: 92, text: "Modus: --" }
+        - button:
+            id: btn_mode_next
+            align: TOP_LEFT
+            x: 316
+            y: 80
+            width: 148
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "weiter", text_font: montserrat_14 }
+            on_click:
+              - lambda: 'id(sp_mode).make_call().select_next(true).perform();'
+        - label: { id: lbl_e_profile, align: TOP_LEFT, x: 16, y: 152, text: "Profil: --" }
+        - button:
+            id: btn_profile_next
+            align: TOP_LEFT
+            x: 316
+            y: 140
+            width: 148
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "weiter", text_font: montserrat_14 }
+            on_click:
+              - lambda: 'id(sp_profile).make_call().select_next(true).perform();'
+        - label: { id: lbl_e_min, align: TOP_LEFT, x: 16, y: 212, text: "Min-T: -- °C" }
+        - button:
+            id: btn_min_dn
+            align: TOP_LEFT
+            x: 316
+            y: 200
+            width: 68
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "-" }
+            on_click:
+              - lambda: |-
+                  float v = id(sp_min_temp).state - 0.5f;
+                  if (v < 5.0f) v = 5.0f;
+                  id(sp_min_temp).make_call().set_value(v).perform();
+        - button:
+            id: btn_min_up
+            align: TOP_LEFT
+            x: 392
+            y: 200
+            width: 68
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "+" }
+            on_click:
+              - lambda: |-
+                  float v = id(sp_min_temp).state + 0.5f;
+                  if (v > 25.0f) v = 25.0f;
+                  id(sp_min_temp).make_call().set_value(v).perform();
+        - label: { id: lbl_e_max, align: TOP_LEFT, x: 16, y: 272, text: "Max-T: -- °C" }
+        - button:
+            id: btn_max_dn
+            align: TOP_LEFT
+            x: 316
+            y: 260
+            width: 68
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "-" }
+            on_click:
+              - lambda: |-
+                  float v = id(sp_max_temp).state - 0.5f;
+                  if (v < 20.0f) v = 20.0f;
+                  id(sp_max_temp).make_call().set_value(v).perform();
+        - button:
+            id: btn_max_up
+            align: TOP_LEFT
+            x: 392
+            y: 260
+            width: 68
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "+" }
+            on_click:
+              - lambda: |-
+                  float v = id(sp_max_temp).state + 0.5f;
+                  if (v > 45.0f) v = 45.0f;
+                  id(sp_max_temp).make_call().set_value(v).perform();
+        - label: { id: lbl_e_leaf, align: TOP_LEFT, x: 16, y: 332, text: "Blatt-Offset: -- K" }
+        - button:
+            id: btn_leaf_dn
+            align: TOP_LEFT
+            x: 316
+            y: 320
+            width: 68
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "-" }
+            on_click:
+              - lambda: |-
+                  float v = id(sp_leaf_offset).state - 0.5f;
+                  if (v < -5.0f) v = -5.0f;
+                  id(sp_leaf_offset).make_call().set_value(v).perform();
+        - button:
+            id: btn_leaf_up
+            align: TOP_LEFT
+            x: 392
+            y: 320
+            width: 68
+            height: 48
+            widgets:
+              - label: { align: CENTER, text: "+" }
+            on_click:
+              - lambda: |-
+                  float v = id(sp_leaf_offset).state + 0.5f;
+                  if (v > 2.0f) v = 2.0f;
+                  id(sp_leaf_offset).make_call().set_value(v).perform();
 
     # ----------------------------------------------------------------- Diagnose
     - id: page_diag
@@ -487,9 +828,9 @@ lvgl:
             id: btn_rs485_resync
             align: TOP_LEFT
             x: 16
-            y: 330
+            y: 326
             width: 448
-            height: 60
+            height: 48
             widgets:
               - label: { align: CENTER, text: "RS485 neu synchronisieren" }
             on_click:
@@ -579,6 +920,68 @@ interval:
           lv_label_set_text(id(lbl_d_rssi), buf);
           snprintf(buf, sizeof(buf), "Uptime: %.0f s", id(diag_uptime).state);
           lv_label_set_text(id(lbl_d_up), buf);
+
+          // --- Bewässerung ---
+          lv_label_set_text(id(lbl_i_state), id(g_irrig_active) ? "Status: LÄUFT" : "Status: bereit");
+          uint16_t im = id(g_irrig_mask);
+          std::string iv;
+          for (int i = 0; i < 8; i++)
+            if (im & (1 << i)) { iv += "V"; iv += std::to_string(i + 1); iv += " "; }
+          if (im & (1 << 8)) iv += "Pumpe";
+          if (iv.empty()) iv = "keine";
+          lv_label_set_text(id(lbl_i_valves), ("Offen: " + iv).c_str());
+          snprintf(buf, sizeof(buf), "Heute: %u s", (unsigned) id(g_daily_irrig_s));
+          lv_label_set_text(id(lbl_i_daily), buf);
+          int zone = (int) id(irrig_zone).state;
+          if (zone == 0) lv_label_set_text(id(lbl_i_zone), "Zone: keine");
+          else { snprintf(buf, sizeof(buf), "Zone: %d", zone); lv_label_set_text(id(lbl_i_zone), buf); }
+          snprintf(buf, sizeof(buf), "Laufzeit: %.0f s", id(irrig_valve_time).state);
+          lv_label_set_text(id(lbl_i_time), buf);
+
+          // --- Sensoren ---
+          snprintf(buf, sizeof(buf), "Temperatur: %.2f °C", id(gh_temp).state);
+          lv_label_set_text(id(lbl_s_gh_t), buf);
+          snprintf(buf, sizeof(buf), "Luftfeuchte: %.2f %%", id(gh_rh).state);
+          lv_label_set_text(id(lbl_s_gh_rh), buf);
+          snprintf(buf, sizeof(buf), "Batterie: %.0f %%", id(gh_batt).state);
+          lv_label_set_text(id(lbl_s_gh_batt), buf);
+          snprintf(buf, sizeof(buf), "RSSI: %.0f dBm", id(gh_rssi).state);
+          lv_label_set_text(id(lbl_s_gh_rssi), buf);
+          if (isnan(id(gh_age).state)) lv_label_set_text(id(lbl_s_gh_age), "Letztes Paket: nie");
+          else { snprintf(buf, sizeof(buf), "Letztes Paket: vor %.0f s", id(gh_age).state);
+                 lv_label_set_text(id(lbl_s_gh_age), buf); }
+          snprintf(buf, sizeof(buf), "Temperatur: %.2f °C", id(room_temp).state);
+          lv_label_set_text(id(lbl_s_rm_t), buf);
+          snprintf(buf, sizeof(buf), "Luftfeuchte: %.2f %%", id(room_rh).state);
+          lv_label_set_text(id(lbl_s_rm_rh), buf);
+          snprintf(buf, sizeof(buf), "Batterie: %.0f %%", id(room_batt).state);
+          lv_label_set_text(id(lbl_s_rm_batt), buf);
+
+          // --- Kalibrierung ---
+          lv_label_set_text(id(lbl_k_state), id(g_servo_cal_valid) ? "Servo-Kalibrierung: gültig"
+                                                                   : "Servo-Kalibrierung: UNGÜLTIG");
+          lv_label_set_text(id(lbl_k_light), id(g_light_on) ? "Licht freigegeben: ja"
+                                                            : "Licht freigegeben: nein");
+          // Scharfschaltung läuft nach 10 s von selbst wieder ab
+          uint32_t nowms = millis();
+          if (id(g_cal_arm_ms) != 0 && nowms >= id(g_cal_arm_ms)) id(g_cal_arm_ms) = 0;
+          if (id(g_cal_arm_ms) != 0) {
+            snprintf(buf, sizeof(buf), "Wirklich freigeben? (%u s)",
+                     (unsigned) ((id(g_cal_arm_ms) - nowms) / 1000 + 1));
+            lv_label_set_text(id(lbl_k_arm), buf);
+          } else {
+            lv_label_set_text(id(lbl_k_arm), "Kalibrierung freigeben");
+          }
+
+          // --- Einstellungen ---
+          lv_label_set_text(id(lbl_e_mode), (std::string("Modus: ") + id(sp_mode).current_option().str()).c_str());
+          lv_label_set_text(id(lbl_e_profile), (std::string("Profil: ") + id(sp_profile).current_option().str()).c_str());
+          snprintf(buf, sizeof(buf), "Min-T: %.1f °C", id(sp_min_temp).state);
+          lv_label_set_text(id(lbl_e_min), buf);
+          snprintf(buf, sizeof(buf), "Max-T: %.1f °C", id(sp_max_temp).state);
+          lv_label_set_text(id(lbl_e_max), buf);
+          snprintf(buf, sizeof(buf), "Blatt-Offset: %.1f K", id(sp_leaf_offset).state);
+          lv_label_set_text(id(lbl_e_leaf), buf);
       - if:
           condition:
             lambda: 'return id(emergency_active).state || id(data_stale).state || !id(rs485_online).state;'

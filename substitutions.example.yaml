@@ -20,6 +20,8 @@ substitutions:
   # dem Zusammenführen der Pakete feststehen.
 
   # --- BLE-Thermometer MACs (in secrets.yaml besser aufgehoben) ---
+  # Firmware-Format muss zur Plattform in packages/ble-sensors.yaml passen
+  # (dort `pvvx_mithermometer`). Falsche Plattform -> gar kein Messwert.
   greenhouse_sensor_mac: "TODO"         # z.B. "A4:C1:38:xx:xx:xx"
   room_sensor_mac: "TODO"
 

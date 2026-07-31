@@ -1,11 +1,13 @@
 # packages/ble-sensors.yaml  (Knoten: greenhouse-hmi PRIMÄR, optional greenhouse-io)
 # Zwei Xiaomi-Thermometer (Gewächshaus + Raum).
 #
-# WICHTIG: Zuerst per Log das TATSÄCHLICHE Werbedatenformat bestimmen
-# (ATC Custom / ATC Mi-Like / PVVX / BTHome v2) und die passende Plattform
-# aktivieren. Unten ist die ATC-Variante aktiv (häufig bei „ATC/PVVX-Firmware").
-# Für BTHome v2 stattdessen `bthome`-Plattform bzw. den nativen HA-BTHome-Weg.
-# -> nicht allein wegen des Begriffs „ATC" raten. Siehe docs/commissioning Phase 5.
+# Werbedatenformat: **PVVX** (custom), vom Nutzer am Gerät bestätigt (2026-07-31)
+# — deshalb `pvvx_mithermometer`, nicht `atc_mithermometer`. Beide Plattformen
+# haben denselben Satz Unterschlüssel (temperature, humidity, battery_level,
+# battery_voltage, signal_strength), lesen aber unterschiedliche Advertisement-
+# Layouts. Mit der falschen Plattform kommt schlicht kein Messwert an.
+# Bei einem Firmware-Wechsel am Thermometer (ATC Custom / ATC Mi-Like / BTHome v2)
+# hier neu entscheiden — siehe docs/commissioning.md Phase 5.
 
 esp32_ble_tracker:
   scan_parameters:
@@ -19,7 +21,7 @@ globals:
 
 sensor:
   # --- Gewächshaus-Sensor (regelungsrelevant) ---
-  - platform: atc_mithermometer
+  - platform: pvvx_mithermometer
     mac_address: ${greenhouse_sensor_mac}
     temperature:
       name: "Gewächshaus Temperatur"
@@ -31,6 +33,7 @@ sensor:
       filters: [filter_out: nan]
     battery_level:
       name: "Gewächshaus Sensor Batterie"
+      id: gh_batt
     battery_voltage:
       name: "Gewächshaus Sensor Batteriespannung"
     signal_strength:
@@ -38,7 +41,7 @@ sensor:
       id: gh_rssi
 
   # --- Raum-Sensor (Referenz, ersetzt NICHT automatisch den GH-Sensor) ---
-  - platform: atc_mithermometer
+  - platform: pvvx_mithermometer
     mac_address: ${room_sensor_mac}
     temperature:
       name: "Raum Temperatur"
@@ -50,6 +53,7 @@ sensor:
       filters: [filter_out: nan]
     battery_level:
       name: "Raum Sensor Batterie"
+      id: room_batt
     signal_strength:
       name: "Raum Sensor RSSI"
       id: room_rssi
